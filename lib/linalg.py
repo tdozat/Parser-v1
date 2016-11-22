@@ -219,8 +219,6 @@ def diagonal_bilinear(inputs1, inputs2, output_size, add_bias1=True, add_bias2=T
         inputs2.set_shape([tf.Dimension(None), tf.Dimension(None), tf.Dimension(inputs2_size)])
         bilin += tf.expand_dims(tf.transpose(linear(inputs2, output_size, add_bias=False, moving_params=moving_params), [0, 2, 1]), 1)
     
-    if 
-    
     return bilin
   
 #===============================================================
