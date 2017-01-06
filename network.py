@@ -64,6 +64,7 @@ class Network(Configurable):
     self._testset = Dataset(self.test_file, self._vocabs, model, self._config, name='Testset')
     
     self._ops = self._gen_ops()
+    self._save_vars = filter(lambda x: u'Pretrained' not in x.name, tf.all_variables())
     self.history = {
       'train_loss': [],
       'train_accuracy': [],
@@ -104,7 +105,7 @@ class Network(Configurable):
   def pretrain(self, sess):
     """"""
     
-    saver = tf.train.Saver(name=self.name, max_to_keep=1)
+    saver = tf.train.Saver(self.save_vars, max_to_keep=1)
     
     print_every = self.print_every
     pretrain_iters = self.pretrain_iters
@@ -151,7 +152,9 @@ class Network(Configurable):
       except:
         print('\r', end='')
         sys.exit(0)
-    saver.save(sess, os.path.join(self.save_dir, self.name.lower() + '-pretrained'), latest_filename=self.name.lower()+'-checkpoint')
+    saver.save(sess, os.path.join(self.save_dir, self.name.lower() + '-pretrained'),
+               latest_filename=self.name.lower()+'-checkpoint',
+               write_meta_graph=False)
     return
   
   #=============================================================
@@ -160,7 +163,7 @@ class Network(Configurable):
     """"""
     
     save_path = os.path.join(self.save_dir, self.name.lower() + '-pretrained')
-    saver = tf.train.Saver(name=self.name, max_to_keep=1)
+    saver = tf.train.Saver(self.save_vars, max_to_keep=1)
     
     n_bkts = self.n_bkts
     train_iters = self.train_iters
@@ -229,7 +232,10 @@ class Network(Configurable):
             n_train_iters = 0
         sess.run(self._global_epoch.assign_add(1.))
         if save_every and (total_train_iters % save_every == 0):
-          saver.save(sess, os.path.join(self.save_dir, self.name.lower() + '-trained'), latest_filename=self.name.lower(), global_step=self.global_epoch)
+          saver.save(sess, os.path.join(self.save_dir, self.name.lower() + '-trained'),
+                     latest_filename=self.name.lower(),
+                     global_step=self.global_epoch,
+                     write_meta_graph=False)
           with open(os.path.join(self.save_dir, 'history.pkl'), 'w') as f:
             pkl.dump(self.history, f)
           self.test(sess, validate=True)
@@ -239,7 +245,10 @@ class Network(Configurable):
       except:
         print('\r', end='')
         sys.exit(0)
-    saver.save(sess, os.path.join(self.save_dir, self.name.lower() + '-trained'), latest_filename=self.name.lower(), global_step=self.global_epoch)
+    saver.save(sess, os.path.join(self.save_dir, self.name.lower() + '-trained'),
+               latest_filename=self.name.lower(),
+               global_step=self.global_epoch,
+               write_meta_graph=False)
     with open(os.path.join(self.save_dir, 'history.pkl'), 'w') as f:
       pkl.dump(self.history, f)
     with open(os.path.join(self.save_dir, 'scores.txt'), 'w') as f:
@@ -367,6 +376,9 @@ class Network(Configurable):
   @property
   def ops(self):
     return self._ops
+  @property
+  def save_vars(self):
+    return self._save_vars
   
 #***************************************************************
 if __name__ == '__main__':
@@ -379,28 +391,53 @@ if __name__ == '__main__':
   argparser.add_argument('--test', action='store_true')
   argparser.add_argument('--load', action='store_true')
   argparser.add_argument('--model', default='Parser')
+  argparser.add_argument('--matrix', action='store_true')
+  argparser.add_argument('--random', action='store_true')
+  
   args, extra_args = argparser.parse_known_args()
   cargs = {k: v for (k, v) in vars(Configurable.argparser.parse_args(extra_args)).iteritems() if v is not None}
+  if args.random:
+    cargs['train_iters'] = 15000
+    cargs['cased'] = str(bool(np.random.randint(2)))
+    cargs['save_dir'] = 'saves/'+str(int(time.time()*100))
+    cargs['n_recur'] = str(np.random.choice([3,4,5], p=[.25, .5, .25]))
+    cargs['embed_size'] = str(int(10**np.random.uniform(1.5, 2.25)))
+    cargs['recur_size'] = str(int(10**np.random.uniform(2, 3)))
+    cargs['mlp_size'] = str(int(10**np.random.uniform(1.5,2.5)))
+    cargs['word_keep_prob'] = str(np.random.uniform(.75,1.))
+    cargs['tag_keep_prob'] = str(np.random.uniform(.75,1.))
+    if np.random.randint(2):
+      cargs['mlp_func'] = 'relu'
+    if np.random.randint(1):
+      cargs['cell_include_prob'] = str(np.random.uniform(.5, 1))
+      cargs['hidden_include_prob'] = str(np.random.uniform(.5, 1))
+    else:
+      cargs['ff_keep_prob'] = str(np.random.uniform(.5,.85))
+      cargs['recur_keep_prob'] = str(np.random.uniform(.5,.85))
+    cargs['mlp_keep_prob'] = str(np.random.uniform(.5,.85))
+    cargs['decay_steps'] = str(int(np.random.uniform(2500,7500)))
   
   print('*** '+args.model+' ***')
   model = getattr(models, args.model)
   
-  if 'save_dir' in cargs and os.path.isdir(cargs['save_dir']) and not (args.test or args.load):
+  if 'save_dir' in cargs and os.path.isdir(cargs['save_dir']) and not (args.test or args.matrix or args.load):
     raw_input('Save directory already exists. Press <Enter> to overwrite or <Ctrl-C> to exit.')
-  if (args.test or args.load) and 'save_dir' in cargs:
+  if (args.test or args.load or args.matrix) and 'save_dir' in cargs:
     cargs['config_file'] = os.path.join(cargs['save_dir'], 'config.cfg')
   network = Network(model, **cargs)
+  os.system('echo Model: %s > %s/MODEL' % (network.model.__class__.__name__, network.save_dir))
+  #print([v.name for v in network.save_vars])
   config_proto = tf.ConfigProto()
   config_proto.gpu_options.per_process_gpu_memory_fraction = network.per_process_gpu_memory_fraction
   with tf.Session(config=config_proto) as sess:
     sess.run(tf.initialize_all_variables())
     if args.pretrain:
       network.pretrain(sess)
-    if not args.test:
+    if not (args.test or args.matrix):
       if args.load:
         os.system('echo Training: > %s/HEAD' % network.save_dir)
         os.system('git rev-parse HEAD >> %s/HEAD' % network.save_dir)
-        saver = tf.train.Saver(name=network.name)
+        saver = tf.train.Saver(var_list=network.save_vars)
         saver.restore(sess, tf.train.latest_checkpoint(network.save_dir, latest_filename=network.name.lower()))
         if os.path.isfile(os.path.join(network.save_dir, 'history.pkl')):
           with open(os.path.join(network.save_dir, 'history.pkl')) as f:
@@ -409,9 +446,15 @@ if __name__ == '__main__':
         os.system('echo Loading: >> %s/HEAD' % network.save_dir)
         os.system('git rev-parse HEAD >> %s/HEAD' % network.save_dir)
       network.train(sess)
+    elif args.matrix:
+      saver = tf.train.Saver(var_list=network.save_vars)
+      saver.restore(sess, tf.train.latest_checkpoint(network.save_dir, latest_filename=network.name.lower()))
+      with tf.variable_scope('AttnParser/RNN2/BiRNN_FW/LSTMCell/Linear', reuse=True):
+        pkl.dump(sess.run(tf.get_variable('Weights')), open('mat.pkl', 'w'))
     else:
       os.system('echo Testing: >> %s/HEAD' % network.save_dir)
       os.system('git rev-parse HEAD >> %s/HEAD' % network.save_dir)
-      saver = tf.train.Saver(name=network.name)
+      saver = tf.train.Saver(var_list=network.save_vars)
       saver.restore(sess, tf.train.latest_checkpoint(network.save_dir, latest_filename=network.name.lower()))
+      network.test(sess, validate=True)
       network.test(sess, validate=False)
