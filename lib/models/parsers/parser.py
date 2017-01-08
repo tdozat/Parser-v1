@@ -29,10 +29,10 @@ class Parser(BaseParser):
     self.n_tokens = tf.reduce_sum(self.sequence_lengths)
     self.moving_params = moving_params
     
-    word_inputs = vocabs[0].embedding_lookup(inputs[:,:,0], inputs[:,:,1], moving_params=self.moving_params)
+    word_inputs, pret_inputs = vocabs[0].embedding_lookup(inputs[:,:,0], inputs[:,:,1], moving_params=self.moving_params)
     tag_inputs  = vocabs[1].embedding_lookup(inputs[:,:,2], moving_params=self.moving_params)
     
-    top_recur = self.embed_concat(word_inputs, tag_inputs)
+    top_recur = self.embed_concat(word_inputs+pret_inputs, tag_inputs)
     for i in xrange(self.n_recur):
       with tf.variable_scope('RNN%d' % i, reuse=reuse):
         top_recur, _ = self.RNN(top_recur)
