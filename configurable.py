@@ -84,6 +84,10 @@ class Configurable(object):
     return self._config.get('OS', 'embed_file')
   argparser.add_argument('--embed_file')
   @property
+  def embed_aux_file(self):
+    return self._config.get('OS', 'embed_aux_file')
+  argparser.add_argument('--embed_aux_file')
+  @property
   def train_file(self):
     return self._config.get('OS', 'train_file')
   argparser.add_argument('--train_file')
@@ -230,6 +234,14 @@ class Configurable(object):
   def recur_keep_prob(self):
     return self._config.getfloat('Dropout', 'recur_keep_prob')
   argparser.add_argument('--recur_keep_prob')
+  @property
+  def cell_include_prob(self):
+    return self._config.getfloat('Dropout', 'cell_include_prob')
+  argparser.add_argument('--cell_include_prob')
+  @property
+  def hidden_include_prob(self):
+    return self._config.getfloat('Dropout', 'hidden_include_prob')
+  argparser.add_argument('--hidden_include_prob')
   @property
   def ff_keep_prob(self):
     return self._config.getfloat('Dropout', 'ff_keep_prob')
