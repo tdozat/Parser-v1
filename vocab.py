@@ -12,7 +12,6 @@ import numpy as np
 import tensorflow as tf
 
 from configurable import Configurable
-from lib.linalg import tanh_const
 
 # TODO MetaVocab?
 #***************************************************************
@@ -153,7 +152,17 @@ class Vocab(Configurable):
           except:
             raise ValueError('The embedding file is misformatted at line %d' % (line_num+1))
     self.pretrained_embeddings = np.array(embeds, dtype=np.float32)
-    del embeds
+    self.pretrained_embeddings = np.pad(self.pretrained_embeddings, ((self.START_IDX, 0), (0, 0)), 'constant')
+    if os.path.isfile(self.embed_aux_file):
+      with open(self.embed_aux_file) as f:
+        for line in f:
+          line = line.strip().split()
+          if line[0] == self.SPECIAL_TOKENS[0]:
+            self.pretrained_embeddings[0] = np.array(line[1:], dtype=np.float32)
+          elif line[0] == self.SPECIAL_TOKENS[1]:
+            self.pretrained_embeddings[1] = np.array(line[1:], dtype=np.float32)
+          elif line[0] == self.SPECIAL_TOKENS[2]:
+            self.pretrained_embeddings[2] = np.array(line[1:], dtype=np.float32)
     return
   
   #=============================================================
@@ -211,40 +220,31 @@ class Vocab(Configurable):
       initializer = tf.random_normal_initializer()
     else:
       initializer = tf.zeros_initializer
-      self.pretrained_embeddings = np.pad(self.pretrained_embeddings, ((self.START_IDX, 0), (0, max(0, self.embed_size - self.pretrained_embeddings.shape[1]))), 'constant')
-      self.pretrained_embeddings = self.pretrained_embeddings[:,:self.embed_size]
     
     with tf.device('/cpu:0'):
       with tf.variable_scope(self.name):
-        self.trainable_embeddings = tanh_const * tf.get_variable('Trainable', shape=(len(self._str2idx), self.embed_size), initializer=initializer)
+        self.trainable_embeddings = tf.get_variable('Trainable', shape=(len(self._str2idx), self.embed_size), initializer=initializer)
         if self.pretrained_embeddings is not None:
           self.pretrained_embeddings /= np.std(self.pretrained_embeddings)
           self.pretrained_embeddings = tf.Variable(self.pretrained_embeddings, trainable=False, name='Pretrained')
     return
   
   #=============================================================
-  def embedding_lookup(self, inputs, pret_inputs=None, keep_prob=1, moving_params=None):
+  def embedding_lookup(self, inputs, pret_inputs=None, moving_params=None):
     """"""
     
     if moving_params is not None:
       trainable_embeddings = moving_params.average(self.trainable_embeddings)
-      keep_prob = 1
     else:
-      if self.drop_gradually:
-        s = self.global_sigmoid
-        keep_prob = s + (1-s)*keep_prob
       trainable_embeddings = self.trainable_embeddings
       
     embed_input = tf.nn.embedding_lookup(trainable_embeddings, inputs)
     if moving_params is None:
       tf.add_to_collection('Weights', embed_input)
     if self.pretrained_embeddings is not None and pret_inputs is not None:
-      embed_input += tf.nn.embedding_lookup(self.pretrained_embeddings, pret_inputs)
-      
-    if isinstance(keep_prob, tf.Tensor) or keep_prob < 1:
-      noise_shape = tf.pack([tf.shape(embed_input)[0], tf.shape(embed_input)[1], 1])
-      embed_input = tf.nn.dropout(embed_input, keep_prob=keep_prob, noise_shape=noise_shape)
-    return embed_input
+      return embed_input, tf.nn.embedding_lookup(self.pretrained_embeddings, pret_inputs)
+    else:
+      return embed_input
   
   #=============================================================
   def weighted_average(self, inputs, moving_params=None):
