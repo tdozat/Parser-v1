@@ -61,11 +61,11 @@ class NN(Configurable):
       if rel_inputs is not None and rel_keep_prob < 1:
         rel_mask = tf.nn.dropout(tf.ones(noise_shape), rel_keep_prob)*rel_keep_prob
         
-      #word_inputs *= word_mask * (word_mask + (1-tag_mask) + (1-rel_mask))
-      #if tag_inputs is not None:
-      #  tag_inputs *= tag_mask * ((1-word_mask) + (tag_mask) + (1-rel_mask))
-      #if rel_inputs is not None:
-      #  rel_inputs *= rel_mask * ((1-word_mask) + (1-tag_mask) + (rel_mask))
+      word_inputs *= word_mask #* (word_mask + (1-tag_mask) + (1-rel_mask))
+      if tag_inputs is not None:
+        tag_inputs *= tag_mask #* ((1-word_mask) + (tag_mask) + (1-rel_mask))
+      if rel_inputs is not None:
+        rel_inputs *= rel_mask #* ((1-word_mask) + (1-tag_mask) + (rel_mask))
     return tf.concat(2, filter(lambda x: x is not None, [word_inputs, tag_inputs, rel_inputs]))
     
   #=============================================================
