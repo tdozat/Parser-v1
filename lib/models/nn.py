@@ -50,48 +50,51 @@ class NN(Configurable):
       rel_keep_prob = self.rel_keep_prob
       noise_shape = tf.pack([tf.shape(word_inputs)[0], tf.shape(word_inputs)[1], 1])
       
-      word_mask = 1
-      tag_mask = 1
-      rel_mask = 1
-      
       if word_keep_prob < 1:
         word_mask = tf.nn.dropout(tf.ones(noise_shape), word_keep_prob)*word_keep_prob
+      else:
+        word_mask = 1
       if tag_inputs is not None and tag_keep_prob < 1:
         tag_mask = tf.nn.dropout(tf.ones(noise_shape), tag_keep_prob)*tag_keep_prob
+      else:
+        tag_mask = 1
       if rel_inputs is not None and rel_keep_prob < 1:
         rel_mask = tf.nn.dropout(tf.ones(noise_shape), rel_keep_prob)*rel_keep_prob
-        
-      word_inputs *= word_mask #* (word_mask + (1-tag_mask) + (1-rel_mask))
+      else:
+        rel_mask = 1
+      
+      word_embed_size = word_inputs.get_shape().as_list()[-1]
+      tag_embed_size = 0 if tag_inputs is None else tag_inputs.get_shape().as_list()[-1]
+      rel_embed_size = 0 if rel_inputs is None else rel_inputs.get_shape().as_list()[-1]
+      total_size = word_embed_size + tag_embed_size + rel_embed_size
+      dropped_sizes = word_mask * word_embed_size + tag_mask * tag_embed_size + rel_mask * rel_embed_size
+      scale_factor = tf.sqrt(total_size / (dropped_sizes + self.epsilon))
+      
+      word_inputs *= word_mask * scale_factor
       if tag_inputs is not None:
-        tag_inputs *= tag_mask #* ((1-word_mask) + (tag_mask) + (1-rel_mask))
+        tag_inputs *= tag_mask * scale_factor
       if rel_inputs is not None:
-        rel_inputs *= rel_mask #* ((1-word_mask) + (1-tag_mask) + (rel_mask))
-    return tf.concat(2, filter(lambda x: x is not None, [word_inputs, tag_inputs, rel_inputs]))
+        rel_inputs *= rel_mask * scale_factor
+    
+    return embed_inputs = tf.concat(2, filter(lambda x: x is not None, [word_inputs, tag_inputs, rel_inputs]))
     
   #=============================================================
-  def RNN(self, inputs):
+  def RNN(self, inputs, fw_keep_mask=None, bw_keep_mask=None):
     """"""
     
+    batch_size = tf.shape(inputs)[0]
     input_size = inputs.get_shape().as_list()[-1]
     cell = self.recur_cell(self._config, input_size=input_size, moving_params=self.moving_params)
     lengths = tf.reshape(tf.to_int64(self.sequence_lengths), [-1])
     
-    if self.moving_params is None:
-      if self.drop_gradually:
-        s = self.global_sigmoid
-        ff_keep_prob = s + (1-s)*self.ff_keep_prob
-        recur_keep_prob = s + (1-s)*self.recur_keep_prob
-      else:
-        ff_keep_prob = self.ff_keep_prob
-        recur_keep_prob = self.recur_keep_prob
-    else:
-      ff_keep_prob = 1
+    if self.moving_params is not None:
       recur_keep_prob = 1
     
     if self.recur_bidir:
-      top_recur, fw_recur, bw_recur = rnn.dynamic_bidirectional_rnn(cell, cell, inputs,
+        top_recur, fw_recur, bw_recur = rnn.dynamic_bidirectional_rnn(cell, cell, inputs,
                                                                     lengths,
-                                                                    ff_keep_prob=ff_keep_prob,
+                                                                    fw_keep_mask=fw_keep_mask,
+                                                                    bw_keep_mask=bw_keep_mask,
                                                                     recur_keep_prob=recur_keep_prob,
                                                                     dtype=tf.float32)
       fw_cell, fw_out = tf.split(1, 2, fw_recur)
@@ -120,7 +123,7 @@ class NN(Configurable):
     else:
       top_recur, end_recur = rnn.dynamic_rnn(cell, inputs,
                                              lengths,
-                                             ff_keep_prob=ff_keep_prob,
+                                             ff_keep_mask=fw_keep_mask,
                                              recur_keep_prob=recur_keep_prob,
                                              dtype=tf.float32)
       top_recur.set_shape([tf.Dimension(None), tf.Dimension(None), tf.Dimension(self.recur_size)])
@@ -170,7 +173,7 @@ class NN(Configurable):
       keep_prob = 1
     if isinstance(keep_prob, tf.Tensor) or keep_prob < 1:
       noise_shape = tf.pack([batch_size] + [1]*(n_dims-2) + [input_size])
-      inputs = tf.nn.dropout(inputs, keep_prob, noise_shape=noise_shape)
+      inputs = tf.nn.dropout(inputs, keep_prob, noise_shape=noise_shape) * tf.sqrt(keep_prob)
     
     linear = linalg.linear(inputs,
                         output_size,

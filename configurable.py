@@ -218,6 +218,11 @@ class Configurable(object):
   def drop_gradually(self):
     return self._config.getboolean('Dropout', 'drop_gradually')
   argparser.add_argument('--drop_gradually')
+  # TODO don't pass keep probabilities to dynamic_rnn, only pass in the mask, which is to be computed in parser.py
+  @property
+  def same_mask(self):
+    return self._config.getboolean('Dropout', 'same_mask')
+  argparser.add_argument('--same_mask')
   @property
   def word_keep_prob(self):
     return self._config.getfloat('Dropout', 'word_keep_prob')

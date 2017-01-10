@@ -9,6 +9,7 @@ import numpy as np
 import tensorflow as tf
 
 from vocab import Vocab
+from lib.linalg import linear
 from lib.models.parsers.base_parser import BaseParser
 
 #***************************************************************
@@ -33,9 +34,32 @@ class Parser(BaseParser):
     tag_inputs  = vocabs[1].embedding_lookup(inputs[:,:,2], moving_params=self.moving_params)
     
     top_recur = self.embed_concat(word_inputs+pret_inputs, tag_inputs)
+    if self.moving_params is None:
+      if self.drop_gradually:
+        s = self.global_sigmoid
+        keep_prob = s + (1-s)*self.ff_keep_prob
+      else:
+        keep_prob = self.ff_keep_prob
+    else:
+      keep_prob = 1
+    batch_size = tf.shape(inputs)[0]
+    if self.same_mask:
+      top_recur = linear(top_recur, self.recur_size * (1+self.recur_bidir), add_bias=False, moving_params=self.moving_params)
+      input_size = top_recur.get_shape().as_list()[-1]
+      fw_keep_mask = tf.nn.dropout(tf.ones(tf.pack([batch_size, input_size])), keep_prob=keep_prob) * tf.sqrt(ff_keep_prob)
+      if self.recur_bidir:
+        bw_keep_mask = tf.nn.dropout(tf.ones(tf.pack([batch_size, input_size])), keep_prob=keep_prob) * tf.sqrt(ff_keep_prob)
+      else:
+        bw_keep_mask = None
     for i in xrange(self.n_recur):
+      if not self.same_mask:
+        fw_keep_mask = tf.nn.dropout(tf.ones(tf.pack([batch_size, input_size])), keep_prob=keep_prob) * tf.sqrt(ff_keep_prob)
+        if self.recur_bidir:
+          bw_keep_mask = tf.nn.dropout(tf.ones(tf.pack([batch_size, input_size])), keep_prob=keep_prob) * tf.sqrt(ff_keep_prob)
+        else:
+          bw_keep_mask = None
       with tf.variable_scope('RNN%d' % i, reuse=reuse):
-        top_recur, _ = self.RNN(top_recur)
+        top_recur, _ = self.RNN(top_recur, fw_keep_mask=fw_keep_mask, bw_keep_mask=bw_keep_mask)
     
     top_mlp = top_recur
     if self.n_mlp > 0:

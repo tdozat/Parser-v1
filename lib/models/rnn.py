@@ -370,7 +370,7 @@ def bidirectional_rnn(cell_fw, cell_bw, inputs, initial_state_fw=None, initial_s
   return (outputs, output_state_fw, output_state_bw)
 
 
-def dynamic_bidirectional_rnn(cell_fw, cell_bw, inputs, sequence_length, initial_state_fw=None, initial_state_bw=None, ff_keep_prob=1., recur_keep_prob=True, dtype=None, parallel_iterations=None, swap_memory=False, time_major=False, scope=None):
+def dynamic_bidirectional_rnn(cell_fw, cell_bw, inputs, sequence_length, initial_state_fw=None, initial_state_bw=None, fw_keep_mask=None, bw_keep_mask=None, recur_keep_prob=True, dtype=None, parallel_iterations=None, swap_memory=False, time_major=False, scope=None):
   """Creates a bidirectional recurrent neural network.
 
   Similar to the unidirectional case above (rnn) but takes input and builds
@@ -419,7 +419,7 @@ def dynamic_bidirectional_rnn(cell_fw, cell_bw, inputs, sequence_length, initial
   name = scope or "BiRNN"
   # Forward direction
   with vs.variable_scope(name + "_FW") as fw_scope:
-    output_fw, output_state_fw = dynamic_rnn(cell_fw, inputs, sequence_length, initial_state_fw, ff_keep_prob, recur_keep_prob, dtype, parallel_iterations, swap_memory, time_major, scope=fw_scope)
+    output_fw, output_state_fw = dynamic_rnn(cell_fw, inputs, sequence_length, initial_state_fw, fw_keep_mask, recur_keep_prob, dtype, parallel_iterations, swap_memory, time_major, scope=fw_scope)
 
   # Backward direction
   if time_major:
@@ -427,7 +427,7 @@ def dynamic_bidirectional_rnn(cell_fw, cell_bw, inputs, sequence_length, initial
   else:
     rev_inputs = array_ops.reverse_sequence(inputs, sequence_length, 1, 0)
   with vs.variable_scope(name + "_BW") as bw_scope:
-    tmp, output_state_bw = dynamic_rnn(cell_bw, rev_inputs, sequence_length, initial_state_bw, ff_keep_prob, recur_keep_prob, dtype, parallel_iterations, swap_memory, time_major, scope=bw_scope)
+    tmp, output_state_bw = dynamic_rnn(cell_bw, rev_inputs, sequence_length, initial_state_bw, bw_keep_mask, recur_keep_prob, dtype, parallel_iterations, swap_memory, time_major, scope=bw_scope)
   if time_major:
     output_bw = array_ops.reverse_sequence(tmp, sequence_length, 0, 1)
   else:
@@ -438,7 +438,7 @@ def dynamic_bidirectional_rnn(cell_fw, cell_bw, inputs, sequence_length, initial
   return (outputs, output_state_fw, output_state_bw)
 
 
-def dynamic_rnn(cell, inputs, sequence_length=None, initial_state=None, ff_keep_prob=1., recur_keep_prob=True, dtype=None, parallel_iterations=None, swap_memory=False, time_major=False, scope=None):
+def dynamic_rnn(cell, inputs, sequence_length=None, initial_state=None, ff_keep_mask=None, recur_keep_prob=True, dtype=None, parallel_iterations=None, swap_memory=False, time_major=False, scope=None):
   """Creates a recurrent neural network specified by RNNCell "cell".
 
   This function is functionally identical to the function `rnn` above, but
@@ -542,7 +542,7 @@ def dynamic_rnn(cell, inputs, sequence_length=None, initial_state=None, ff_keep_
             sequence_length, name="CheckSeqLen")
 
     (outputs, final_state) = _dynamic_rnn_loop(
-        cell, inputs, state, ff_keep_prob=ff_keep_prob, recur_keep_prob=recur_keep_prob, parallel_iterations=parallel_iterations,
+        cell, inputs, state, ff_keep_mask=ff_keep_mask, recur_keep_prob=recur_keep_prob, parallel_iterations=parallel_iterations,
         swap_memory=swap_memory, sequence_length=sequence_length)
 
     # Outputs of _dynamic_rnn_loop are always shaped [time, batch, depth].
@@ -554,7 +554,7 @@ def dynamic_rnn(cell, inputs, sequence_length=None, initial_state=None, ff_keep_
     return (outputs, final_state)
 
 
-def _dynamic_rnn_loop( cell, inputs, initial_state, ff_keep_prob, recur_keep_prob, parallel_iterations, swap_memory, sequence_length=None):
+def _dynamic_rnn_loop( cell, inputs, initial_state, ff_keep_mask, recur_keep_prob, parallel_iterations, swap_memory, sequence_length=None):
   """Internal implementation of Dynamic RNN.
 
   Args:
@@ -611,13 +611,13 @@ def _dynamic_rnn_loop( cell, inputs, initial_state, ff_keep_prob, recur_keep_pro
       dtype=inputs.dtype, size=time_steps,
       tensor_array_name=base_name + "input")
 
-  if isinstance(ff_keep_prob, ops.Tensor) or ff_keep_prob < 1:
-    inputs = nn_ops.dropout(inputs, ff_keep_prob, noise_shape=array_ops.pack([1, batch_size, const_depth]))
+  if ff_keep_mask is not None:
+    inputs *= ff_keep_mask
   input_ta = input_ta.unpack(inputs)
   
   if isinstance(recur_keep_prob, ops.Tensor) or recur_keep_prob < 1:
     ones = array_ops.ones(array_ops.pack([batch_size, cell.output_size]), inputs.dtype)
-    state_dropout = nn_ops.dropout(ones, recur_keep_prob)
+    state_dropout = nn_ops.dropout(ones, recur_keep_prob) * tf.sqrt(recur_keep_prob)
     state_dropout = array_ops.concat(1, [ones] * (cell.state_size // cell.output_size - 1) + [state_dropout])
   else:
     state_dropout = 1.
