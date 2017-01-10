@@ -6,5 +6,6 @@ from kg_parser import KGParser
 # Experimental stuff
 try:
   from parser2 import Parser2
+  from parser3 import Parser3
 except ImportError:
   pass
