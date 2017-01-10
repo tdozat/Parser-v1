@@ -617,7 +617,7 @@ def _dynamic_rnn_loop( cell, inputs, initial_state, ff_keep_mask, recur_keep_pro
   
   if isinstance(recur_keep_prob, ops.Tensor) or recur_keep_prob < 1:
     ones = array_ops.ones(array_ops.pack([batch_size, cell.output_size]), inputs.dtype)
-    state_dropout = nn_ops.dropout(ones, recur_keep_prob) * tf.sqrt(recur_keep_prob)
+    state_dropout = nn_ops.dropout(ones, recur_keep_prob) * math_ops.sqrt(recur_keep_prob)
     state_dropout = array_ops.concat(1, [ones] * (cell.state_size // cell.output_size - 1) + [state_dropout])
   else:
     state_dropout = 1.

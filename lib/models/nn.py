@@ -76,7 +76,7 @@ class NN(Configurable):
       if rel_inputs is not None:
         rel_inputs *= rel_mask * scale_factor
     
-    return embed_inputs = tf.concat(2, filter(lambda x: x is not None, [word_inputs, tag_inputs, rel_inputs]))
+    return tf.concat(2, filter(lambda x: x is not None, [word_inputs, tag_inputs, rel_inputs]))
     
   #=============================================================
   def RNN(self, inputs, fw_keep_mask=None, bw_keep_mask=None):
@@ -87,11 +87,13 @@ class NN(Configurable):
     cell = self.recur_cell(self._config, input_size=input_size, moving_params=self.moving_params)
     lengths = tf.reshape(tf.to_int64(self.sequence_lengths), [-1])
     
-    if self.moving_params is not None:
+    if self.moving_params is None:
+      recur_keep_prob = self.recur_keep_prob
+    else:
       recur_keep_prob = 1
     
     if self.recur_bidir:
-        top_recur, fw_recur, bw_recur = rnn.dynamic_bidirectional_rnn(cell, cell, inputs,
+      top_recur, fw_recur, bw_recur = rnn.dynamic_bidirectional_rnn(cell, cell, inputs,
                                                                     lengths,
                                                                     fw_keep_mask=fw_keep_mask,
                                                                     bw_keep_mask=bw_keep_mask,

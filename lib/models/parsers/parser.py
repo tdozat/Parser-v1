@@ -41,21 +41,22 @@ class Parser(BaseParser):
       else:
         keep_prob = self.ff_keep_prob
     else:
-      keep_prob = 1
+      keep_prob = 1.
     batch_size = tf.shape(inputs)[0]
     if self.same_mask:
       top_recur = linear(top_recur, self.recur_size * (1+self.recur_bidir), add_bias=False, moving_params=self.moving_params)
       input_size = top_recur.get_shape().as_list()[-1]
-      fw_keep_mask = tf.nn.dropout(tf.ones(tf.pack([batch_size, input_size])), keep_prob=keep_prob) * tf.sqrt(ff_keep_prob)
+      fw_keep_mask = tf.nn.dropout(tf.ones(tf.pack([batch_size, input_size])), keep_prob=keep_prob) * tf.sqrt(keep_prob)
       if self.recur_bidir:
-        bw_keep_mask = tf.nn.dropout(tf.ones(tf.pack([batch_size, input_size])), keep_prob=keep_prob) * tf.sqrt(ff_keep_prob)
+        bw_keep_mask = tf.nn.dropout(tf.ones(tf.pack([batch_size, input_size])), keep_prob=keep_prob) * tf.sqrt(keep_prob)
       else:
         bw_keep_mask = None
     for i in xrange(self.n_recur):
       if not self.same_mask:
-        fw_keep_mask = tf.nn.dropout(tf.ones(tf.pack([batch_size, input_size])), keep_prob=keep_prob) * tf.sqrt(ff_keep_prob)
+        input_size = top_recur.get_shape().as_list()[-1]
+        fw_keep_mask = tf.nn.dropout(tf.ones(tf.pack([batch_size, input_size])), keep_prob=keep_prob) * tf.sqrt(keep_prob)
         if self.recur_bidir:
-          bw_keep_mask = tf.nn.dropout(tf.ones(tf.pack([batch_size, input_size])), keep_prob=keep_prob) * tf.sqrt(ff_keep_prob)
+          bw_keep_mask = tf.nn.dropout(tf.ones(tf.pack([batch_size, input_size])), keep_prob=keep_prob) * tf.sqrt(keep_prob)
         else:
           bw_keep_mask = None
       with tf.variable_scope('RNN%d' % i, reuse=reuse):

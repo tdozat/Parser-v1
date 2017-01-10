@@ -87,7 +87,7 @@ def linear(inputs, output_size, add_bias=True, n_splits=1, initializer=None, sco
     # Do the multiplication
     new = tf.matmul(concatenation, matrix) + bias
     new = tf.reshape(new, output_shape)
-    new.set_shape([tf.Dimension(None) for _ in xrange(len(output_shape)-1)] + tf.Dimension(output_size))
+    new.set_shape([tf.Dimension(None) for _ in xrange(len(shapes[0])-1)] + [tf.Dimension(output_size)])
     if n_splits > 1:
       return tf.split(len(new.get_shape().as_list())-1, n_splits, new)
     else:
