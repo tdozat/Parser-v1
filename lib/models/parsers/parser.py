@@ -43,22 +43,16 @@ class Parser(BaseParser):
     else:
       keep_prob = 1.
     batch_size = tf.shape(inputs)[0]
-    if self.same_mask:
-      top_recur = linear(top_recur, self.recur_size * (1+self.recur_bidir), add_bias=False, moving_params=self.moving_params)
-      input_size = top_recur.get_shape().as_list()[-1]
-      fw_keep_mask = tf.nn.dropout(tf.ones(tf.pack([batch_size, input_size])), keep_prob=keep_prob) * tf.sqrt(keep_prob)
-      if self.recur_bidir:
-        bw_keep_mask = tf.nn.dropout(tf.ones(tf.pack([batch_size, input_size])), keep_prob=keep_prob) * tf.sqrt(keep_prob)
-      else:
-        bw_keep_mask = None
     for i in xrange(self.n_recur):
-      if not self.same_mask:
+      if self.moving_params is None:
         input_size = top_recur.get_shape().as_list()[-1]
         fw_keep_mask = tf.nn.dropout(tf.ones(tf.pack([batch_size, input_size])), keep_prob=keep_prob) * tf.sqrt(keep_prob)
         if self.recur_bidir:
           bw_keep_mask = tf.nn.dropout(tf.ones(tf.pack([batch_size, input_size])), keep_prob=keep_prob) * tf.sqrt(keep_prob)
         else:
           bw_keep_mask = None
+      else:
+        fw_keep_mask = bw_keep_mask = None
       with tf.variable_scope('RNN%d' % i, reuse=reuse):
         top_recur, _ = self.RNN(top_recur, fw_keep_mask=fw_keep_mask, bw_keep_mask=bw_keep_mask)
     
