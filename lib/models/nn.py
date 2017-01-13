@@ -68,7 +68,7 @@ class NN(Configurable):
       rel_embed_size = 0 if rel_inputs is None else rel_inputs.get_shape().as_list()[-1]
       total_size = word_embed_size + tag_embed_size + rel_embed_size
       dropped_sizes = word_mask * word_embed_size + tag_mask * tag_embed_size + rel_mask * rel_embed_size
-      scale_factor = tf.sqrt(total_size / (dropped_sizes + self.epsilon))
+      scale_factor = total_size / (dropped_sizes + self.epsilon)
       
       word_inputs *= word_mask * scale_factor
       if tag_inputs is not None:
@@ -175,7 +175,7 @@ class NN(Configurable):
       keep_prob = 1
     if isinstance(keep_prob, tf.Tensor) or keep_prob < 1:
       noise_shape = tf.pack([batch_size] + [1]*(n_dims-2) + [input_size])
-      inputs = tf.nn.dropout(inputs, keep_prob, noise_shape=noise_shape) * tf.sqrt(keep_prob)
+      inputs = tf.nn.dropout(inputs, keep_prob, noise_shape=noise_shape)
     
     linear = linalg.linear(inputs,
                         output_size,
@@ -202,6 +202,7 @@ class NN(Configurable):
     else:
       return linear
   
+  
   #=============================================================
   def double_MLP(self, inputs, n_splits=1):
     """"""
@@ -223,7 +224,7 @@ class NN(Configurable):
       keep_prob = 1
     if isinstance(keep_prob, tf.Tensor) or keep_prob < 1:
       noise_shape = tf.pack([batch_size, 1, input_size])
-      inputs = tf.nn.dropout(inputs, keep_prob, noise_shape=noise_shape) * tf.sqrt(keep_prob)
+      inputs = tf.nn.dropout(inputs, keep_prob, noise_shape=noise_shape)
     
     lin1, lin2 = linalg.linear(inputs,
                                output_size*n_splits,
@@ -273,7 +274,7 @@ class NN(Configurable):
       keep_prob = 1
     if isinstance(keep_prob, tf.Tensor) or keep_prob < 1:
       noise_shape = tf.pack([batch_size] + [1]*(n_dims-2) +[input_size])
-      inputs = tf.nn.dropout(inputs, keep_prob, noise_shape=noise_shape) * tf.sqrt(keep_prob)
+      inputs = tf.nn.dropout(inputs, keep_prob, noise_shape=noise_shape)
     
     inputs = tf.reshape(inputs, [-1, input_size])
     output = linalg.linear(inputs,
@@ -305,8 +306,8 @@ class NN(Configurable):
       keep_prob = 1
     if isinstance(keep_prob, tf.Tensor) or keep_prob < 1:
       noise_shape = tf.pack([batch_size, 1, input_size])
-      inputs1 = tf.nn.dropout(inputs1, keep_prob, noise_shape=noise_shape) * tf.sqrt(keep_prob)
-      inputs2 = tf.nn.dropout(inputs2, keep_prob, noise_shape=noise_shape) * tf.sqrt(keep_prob)
+      inputs1 = tf.nn.dropout(inputs1, keep_prob, noise_shape=noise_shape)
+      inputs2 = tf.nn.dropout(inputs2, keep_prob, noise_shape=noise_shape)
     
     bilin = linalg.bilinear(inputs1, inputs2, 1,
                             add_bias1=add_bias1,
@@ -336,8 +337,8 @@ class NN(Configurable):
       keep_prob = 1
     if isinstance(keep_prob, tf.Tensor) or keep_prob < 1:
       noise_shape = tf.pack([batch_size, 1, input_size])
-      inputs1 = tf.nn.dropout(inputs1, tf.sqrt(keep_prob), noise_shape=noise_shape) * tf.sqrt(keep_prob)
-      inputs2 = tf.nn.dropout(inputs2, tf.sqrt(keep_prob), noise_shape=noise_shape) * tf.sqrt(keep_prob)
+      inputs1 = tf.nn.dropout(inputs1, tf.sqrt(keep_prob), noise_shape=noise_shape)
+      inputs2 = tf.nn.dropout(inputs2, tf.sqrt(keep_prob), noise_shape=noise_shape)
     
     bilin = linalg.diagonal_bilinear(inputs1, inputs2, 1,
                                      add_bias1=add_bias1,
@@ -371,7 +372,7 @@ class NN(Configurable):
       keep_prob = 1
     if isinstance(keep_prob, tf.Tensor) or keep_prob < 1:
       noise_shape = tf.pack([batch_size, 1, 1, input_size])
-      inputs = tf.nn.dropout(inputs, keep_prob, noise_shape=noise_shape) * tf.sqrt(keep_prob)
+      inputs = tf.nn.dropout(inputs, keep_prob, noise_shape=noise_shape)
     
     lin = linalg.linear(inputs,
                         n_classes,
@@ -407,8 +408,8 @@ class NN(Configurable):
       keep_prob = 1
     if isinstance(keep_prob, tf.Tensor) or keep_prob < 1:
       noise_shape = tf.pack([batch_size, 1, input_size])
-      inputs1 = tf.nn.dropout(inputs1, tf.sqrt(keep_prob), noise_shape=noise_shape) * tf.sqrt(keep_prob)
-      inputs2 = tf.nn.dropout(inputs2, tf.sqrt(keep_prob), noise_shape=noise_shape) * tf.sqrt(keep_prob)
+      inputs1 = tf.nn.dropout(inputs1, tf.sqrt(keep_prob), noise_shape=noise_shape)
+      inputs2 = tf.nn.dropout(inputs2, tf.sqrt(keep_prob), noise_shape=noise_shape)
     
     inputs1 = tf.concat(2, [inputs1, tf.ones(tf.pack([batch_size, bucket_size, 1]))])
     inputs1.set_shape(input_shape_to_set)
@@ -450,8 +451,8 @@ class NN(Configurable):
       keep_prob = 1
     if isinstance(keep_prob, tf.Tensor) or keep_prob < 1:
       noise_shape = tf.pack([batch_size, 1, input_size])
-      inputs1 = tf.nn.dropout(inputs1, keep_prob, noise_shape=noise_shape) * tf.sqrt(keep_prob)
-      inputs2 = tf.nn.dropout(inputs2, keep_prob, noise_shape=noise_shape) * tf.sqrt(keep_prob)
+      inputs1 = tf.nn.dropout(inputs1, keep_prob, noise_shape=noise_shape)
+      inputs2 = tf.nn.dropout(inputs2, keep_prob, noise_shape=noise_shape)
     
     inputs1 = tf.concat(2, [inputs1, tf.ones(tf.pack([batch_size, bucket_size, 1]))])
     inputs1.set_shape(input_shape_to_set)

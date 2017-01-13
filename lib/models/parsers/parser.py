@@ -46,9 +46,9 @@ class Parser(BaseParser):
     for i in xrange(self.n_recur):
       if self.moving_params is None:
         input_size = top_recur.get_shape().as_list()[-1]
-        fw_keep_mask = tf.nn.dropout(tf.ones(tf.pack([batch_size, input_size])), keep_prob=keep_prob) * tf.sqrt(keep_prob)
+        fw_keep_mask = tf.nn.dropout(tf.ones(tf.pack([batch_size, input_size])), keep_prob=keep_prob)
         if self.recur_bidir:
-          bw_keep_mask = tf.nn.dropout(tf.ones(tf.pack([batch_size, input_size])), keep_prob=keep_prob) * tf.sqrt(keep_prob)
+          bw_keep_mask = tf.nn.dropout(tf.ones(tf.pack([batch_size, input_size])), keep_prob=keep_prob)
         else:
           bw_keep_mask = None
       else:
