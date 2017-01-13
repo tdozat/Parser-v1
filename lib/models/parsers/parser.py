@@ -47,7 +47,7 @@ class Parser(BaseParser):
     word_inputs, pret_inputs = vocabs[0].embedding_lookup(inputs[:,:,0], inputs[:,:,1], moving_params=self.moving_params)
     tag_inputs  = vocabs[1].embedding_lookup(inputs[:,:,2], moving_params=self.moving_params)
     
-    top_recur = self.embed_concat(word_inputs+pret_inputs, tag_inputs)
+    embed_inputs = top_recur = self.embed_concat(word_inputs+pret_inputs, tag_inputs)
     if self.moving_params is None:
       if self.drop_gradually:
         s = self.global_sigmoid
@@ -110,7 +110,7 @@ class Parser(BaseParser):
     output['accuracy'] = output['n_correct'] / output['n_tokens']
     output['loss'] = parse_output['loss'] + rel_output['loss'] 
     
-    output['embed'] = tf.pack([word_inputs, tag_inputs])
+    output['embed'] = embed_inputs
     output['recur'] = top_recur
     output['dep'] = dep_mlp
     output['head_dep'] = head_dep_mlp

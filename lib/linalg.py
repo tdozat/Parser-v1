@@ -50,8 +50,10 @@ def orthonormal_initializer(input_size, output_size):
       if np.isnan(Q[0,0]):
         lr /= 2
         break
-    if np.isfinite(loss) and not Q[0,0] > 1e6:
+    if np.isfinite(loss) and not np.max(Q) > 1e6:
       success = True
+    else:
+      print('Orthonormal initialization failed, retrying')
   print('Orthogonal pretrainer loss: %.2e' % loss)
   return Q.astype(np.float32)
 
