@@ -429,7 +429,7 @@ if __name__ == '__main__':
       cargs['ff_keep_prob'] = str(np.random.uniform(.5,.85))
       cargs['recur_keep_prob'] = str(np.random.uniform(.5,.85))
     cargs['mlp_keep_prob'] = str(np.random.uniform(.5,.85))
-    cargs['decay_steps'] = str(int(np.random.uniform(2500,7500)))
+    cargs['decay_steps'] = str(int(np.random.uniform(1000,7500)))
   
   print('*** '+args.model+' ***')
   model = getattr(models, args.model)

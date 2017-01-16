@@ -232,12 +232,14 @@ class Vocab(Configurable):
     
     if self.pretrained_embeddings is None:
       initializer = tf.random_normal_initializer()
+      embed_size = self.embed_size
     else:
       initializer = tf.zeros_initializer
+      embed_size = self.pretrained_embeddings.shape[1]
     
     with tf.device('/cpu:0'):
       with tf.variable_scope(self.name):
-        self.trainable_embeddings = tf.get_variable('Trainable', shape=(len(self._str2idx), self.embed_size), initializer=initializer)
+        self.trainable_embeddings = tf.get_variable('Trainable', shape=(len(self._str2idx), embed_size), initializer=initializer)
         if self.pretrained_embeddings is not None:
           self.pretrained_embeddings /= np.std(self.pretrained_embeddings)
           self.pretrained_embeddings = tf.Variable(self.pretrained_embeddings, trainable=False, name='Pretrained')

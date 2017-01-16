@@ -40,21 +40,24 @@ def orthonormal_initializer(input_size, output_size):
   lr = .1
   eps = .05/(output_size + input_size)
   success = False
-  while not success:
+  tries = 0
+  while not success and tries < 10:
     Q = np.random.randn(input_size, output_size) / np.sqrt(output_size)
     for i in xrange(100):
       QTQmI = Q.T.dot(Q) - I
       loss = np.sum(QTQmI**2 / 2)
       Q2 = Q**2
       Q -= lr*Q.dot(QTQmI) / (np.abs(Q2 + Q2.sum(axis=0, keepdims=True) + Q2.sum(axis=1, keepdims=True) - 1) + eps)
-      if np.isnan(Q[0,0]):
+      if np.max(Q) > 1e6 or or loss > 1e6 or not np.isfinite(loss):
+        tries += 1
         lr /= 2
         break
-    if np.isfinite(loss) and not np.max(Q) > 1e6:
-      success = True
-    else:
-      print('Orthonormal initialization failed, retrying')
-  print('Orthogonal pretrainer loss: %.2e' % loss)
+    success = True
+  if success:
+    print('Orthogonal pretrainer loss: %.2e' % loss)
+  else:
+    print('Orthogonal pretrainer failed, using non-orthogonal random matrix')
+    Q = np.random.randn(input_size, output_size) / np.sqrt(output_size)
   return Q.astype(np.float32)
 
 #===============================================================
