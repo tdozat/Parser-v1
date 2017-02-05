@@ -168,6 +168,81 @@ class NN(Configurable):
     return top_recur, end_recur
   
   #=============================================================
+  def RNN(self, inputs, fw_keep_mask=None, bw_keep_mask=None):
+    """"""
+    
+    batch_size = tf.shape(inputs)[0]
+    input_size = inputs.get_shape().as_list()[-1]
+    cell = self.recur_cell(self._config, input_size=input_size, moving_params=self.moving_params)
+    lengths = tf.reshape(tf.to_int64(self.sequence_lengths), [-1])
+    
+    if self.moving_params is None:
+      recur_keep_prob = self.recur_keep_prob
+    else:
+      recur_keep_prob = 1
+    
+    if self.recur_bidir:
+      top_recur, fw_recur, bw_recur = rnn.dynamic_bidirectional_rnn(cell, cell, inputs,
+                                                                    lengths,
+                                                                    fw_keep_mask=fw_keep_mask,
+                                                                    bw_keep_mask=bw_keep_mask,
+                                                                    recur_keep_prob=recur_keep_prob,
+                                                                    dtype=tf.float32)
+      fw_cell, fw_out = tf.split(1, 2, fw_recur)
+      bw_cell, bw_out = tf.split(1, 2, bw_recur)
+      end_recur = tf.concat(1, [fw_out, bw_out])
+      top_recur.set_shape([tf.Dimension(None), tf.Dimension(None), tf.Dimension(2*self.recur_size)])
+      if self.moving_params is None:
+        for direction in ('FW', 'BW'):
+          if self.recur_cell.__name__ != 'GRUCell':
+            with tf.variable_scope("BiRNN_%s/%s/Linear" % (direction,self.recur_cell.__name__), reuse=True):
+              matrix = tf.get_variable('Weights')
+              n_splits = matrix.get_shape().as_list()[-1] // self.recur_size
+              I = tf.diag(tf.ones([self.recur_size]))
+              for W in tf.split(1, n_splits, matrix):
+                WTWmI = tf.matmul(W, W, transpose_a=True) - I
+                tf.add_to_collection('ortho_losses', tf.nn.l2_loss(WTWmI))
+          else:
+            for name in ['Gates', 'Candidate']:
+              with tf.variable_scope("BiRNN_%s/GRUCell/%s/Linear" % (direction,name), reuse=True):
+                matrix = tf.get_variable('Weights')
+                n_splits = matrix.get_shape().as_list()[-1] // self.recur_size
+                I = tf.diag(tf.ones([self.recur_size]))
+                for W in tf.split(1, n_splits, matrix):
+                  WTWmI = tf.matmul(W, W, transpose_a=True) - I
+                  tf.add_to_collection('ortho_losses', tf.nn.l2_loss(WTWmI))
+    else:
+      top_recur, end_recur = rnn.dynamic_rnn(cell, inputs,
+                                             lengths,
+                                             ff_keep_mask=fw_keep_mask,
+                                             recur_keep_prob=recur_keep_prob,
+                                             dtype=tf.float32)
+      top_recur.set_shape([tf.Dimension(None), tf.Dimension(None), tf.Dimension(self.recur_size)])
+      if self.moving_params is None:
+        if self.recur_cell.__name__ != 'GRUCell':
+          with tf.variable_scope("%s/Linear" % (self.recur_cell.__name__), reuse=True):
+            matrix = tf.get_variable('Weights')
+            n_splits = matrix.get_shape().as_list()[-1] // self.recur_size
+            I = tf.diag(tf.ones([self.recur_size]))
+            for W in tf.split(1, n_splits, matrix):
+              WTWmI = tf.matmul(W, W, transpose_a=True) - I
+              tf.add_to_collection('ortho_losses', tf.nn.l2_loss(WTWmI))
+        else:
+          for name in ['Gates', 'Candidate']:
+            with tf.variable_scope("GRUCell/%s/Linear" % (name), reuse=True):
+              matrix = tf.get_variable('Weights')
+              n_splits = matrix.get_shape().as_list()[-1] // self.recur_size
+              I = tf.diag(tf.ones([self.recur_size]))
+              for W in tf.split(1, n_splits, matrix):
+                WTWmI = tf.matmul(W, W, transpose_a=True) - I
+                tf.add_to_collection('ortho_losses', tf.nn.l2_loss(WTWmI))
+              
+    if self.moving_params is None:
+      tf.add_to_collection('recur_losses', self.recur_loss(top_recur))
+      tf.add_to_collection('covar_losses', self.covar_loss(top_recur))
+    return top_recur, end_recur
+  
+  #=============================================================
   def MLP(self, inputs, n_splits=1):
     """"""
     
@@ -216,6 +291,42 @@ class NN(Configurable):
     else:
       return linear
   
+  #=============================================================
+  def linear(self, inputs, output_size, add_bias=False):
+    """"""
+    
+    n_dims = len(inputs.get_shape().as_list())
+    batch_size = tf.shape(inputs)[0]
+    bucket_size = tf.shape(inputs)[1]
+    input_size = inputs.get_shape().as_list()[-1]
+    output_shape = tf.pack([batch_size] + [bucket_size]*(n_dims-2) + [output_size])
+    shape_to_set = [tf.Dimension(None)]*(n_dims-1) + [tf.Dimension(output_size)]
+    
+    if self.moving_params is None:
+      if self.drop_gradually:
+        s = self.global_sigmoid
+        keep_prob = s + (1-s)*self.mlp_keep_prob
+      else:
+        keep_prob = self.mlp_keep_prob
+    else:
+      keep_prob = 1
+    if isinstance(keep_prob, tf.Tensor) or keep_prob < 1:
+      noise_shape = tf.pack([batch_size] + [1]*(n_dims-2) + [input_size])
+      inputs = tf.nn.dropout(inputs, keep_prob, noise_shape=noise_shape)
+    
+    lin = linalg.linear(inputs,
+                        output_size,
+                        add_bias=add_bias,
+                        moving_params=self.moving_params)
+    lin.set_shape(shape_to_set)
+    if self.moving_params is None:
+      with tf.variable_scope('Linear', reuse=True):
+        W = tf.get_variable('Weights')
+        I = tf.diag(tf.ones([output_size]))
+        WTWmI = tf.matmul(W, W, transpose_a=True) - I
+        tf.add_to_collection('ortho_losses', tf.nn.l2_loss(WTWmI))
+      tf.add_to_collection('covar_losses', self.covar_loss(lin))
+    return lin
   
   #=============================================================
   def double_MLP(self, inputs, n_splits=1):
@@ -398,7 +509,7 @@ class NN(Configurable):
     return weighted_lin, lin
   
   #=============================================================
-  def conditional_diagonal_bilinear_classifier(self, inputs1, inputs2, n_classes, probs, add_bias1=True, add_bias2=True):
+  def conditional_diagonal_bilinear_classifier(self, inputs1, inputs2, n_classes, probs, add_bias1=True, add_bias2=True, add_bias=True):
     """"""
     
     input_shape = tf.shape(inputs1)
@@ -422,18 +533,15 @@ class NN(Configurable):
       keep_prob = 1
     if isinstance(keep_prob, tf.Tensor) or keep_prob < 1:
       noise_shape = tf.pack([batch_size, 1, input_size])
-      inputs1 = tf.nn.dropout(inputs1, tf.sqrt(keep_prob), noise_shape=noise_shape)
-      inputs2 = tf.nn.dropout(inputs2, tf.sqrt(keep_prob), noise_shape=noise_shape)
-    
-    inputs1 = tf.concat(2, [inputs1, tf.ones(tf.pack([batch_size, bucket_size, 1]))])
-    inputs1.set_shape(input_shape_to_set)
-    inputs2 = tf.concat(2, [inputs2, tf.ones(tf.pack([batch_size, bucket_size, 1]))])
-    inputs2.set_shape(input_shape_to_set)
+      drop_mask = tf.nn.dropout(tf.ones(noise_shape), keep_prob, noise_shape=noise_shape)
+      inputs1 *= drop_mask
+      inputs2 *= drop_mask
     
     bilin = linalg.diagonal_bilinear(inputs1, inputs2,
                                      n_classes,
                                      add_bias1=add_bias1,
                                      add_bias2=add_bias2,
+                                     add_bias=add_bias,
                                      initializer=tf.zeros_initializer,
                                      moving_params=self.moving_params)
     weighted_bilin = tf.batch_matmul(bilin, tf.expand_dims(probs, 3))
@@ -575,108 +683,119 @@ class NN(Configurable):
     return tf.nn.l2_loss(off_diag_covar_mat)
   
   #=============================================================
-  @staticmethod
-  def tag_argmax(tag_probs, tokens_to_keep):
+  def tag_argmax(self, tag_probs, tokens_to_keep):
     """"""
     
     return np.argmax(tag_probs[:,Vocab.ROOT:], axis=1)+Vocab.ROOT
   
   #=============================================================
-  @staticmethod
-  def parse_argmax(parse_probs, tokens_to_keep):
+  def parse_argmax(self, parse_probs, tokens_to_keep):
     """"""
     
-    tokens_to_keep[0] = True
-    length = np.sum(tokens_to_keep)
-    I = np.eye(len(tokens_to_keep))
-    # block loops and pad heads
-    parse_probs = parse_probs * tokens_to_keep * (1-I)
-    parse_preds = np.argmax(parse_probs, axis=1)
-    tokens = np.arange(1, length)
-    roots = np.where(parse_preds[tokens] == 0)[0]+1
-    # ensure at least one root
-    if len(roots) < 1:
-      # The current root probabilities
-      root_probs = parse_probs[tokens,0]
-      # The current head probabilities
-      old_head_probs = parse_probs[tokens, parse_preds[tokens]]
-      # Get new potential root probabilities
-      new_root_probs = root_probs / old_head_probs
-      # Select the most probable root
-      new_root = tokens[np.argmax(new_root_probs)]
-      # Make the change
-      parse_preds[new_root] = 0
-    # ensure at most one root
-    elif len(roots) > 1:
-      # The probabilities of the current heads
-      root_probs = parse_probs[roots,0]
-      # Set the probability of depending on the root zero
-      parse_probs[roots,0] = 0
-      # Get new potential heads and their probabilities
-      new_heads = np.argmax(parse_probs[roots][:,tokens], axis=1)+1
-      new_head_probs = parse_probs[roots, new_heads] / root_probs
-      # Select the most probable root
-      new_root = roots[np.argmin(new_head_probs)]
-      # Make the change
-      parse_preds[roots] = new_heads
-      parse_preds[new_root] = 0
-    # remove cycles
-    tarjan = Tarjan(parse_preds, tokens)
-    cycles = tarjan.SCCs
-    for SCC in tarjan.SCCs:
-      if len(SCC) > 1:
-        dependents = set()
-        to_visit = set(SCC)
-        while len(to_visit) > 0:
-          node = to_visit.pop()
-          if not node in dependents:
-            dependents.add(node)
-            to_visit.update(tarjan.edges[node])
-        # The indices of the nodes that participate in the cycle
-        cycle = np.array(list(SCC))
-        # The probabilities of the current heads
-        old_heads = parse_preds[cycle]
-        old_head_probs = parse_probs[cycle, old_heads]
-        # Set the probability of depending on a non-head to zero
-        non_heads = np.array(list(dependents))
-        parse_probs[np.repeat(cycle, len(non_heads)), np.repeat([non_heads], len(cycle), axis=0).flatten()] = 0
-        # Get new potential heads and their probabilities
-        new_heads = np.argmax(parse_probs[cycle][:,tokens], axis=1)+1
-        new_head_probs = parse_probs[cycle, new_heads] / old_head_probs
-        # Select the most probable change
-        change = np.argmax(new_head_probs)
-        changed_cycle = cycle[change]
-        old_head = old_heads[change]
-        new_head = new_heads[change]
+    if self.ensure_tree:
+      tokens_to_keep[0] = True
+      length = np.sum(tokens_to_keep)
+      I = np.eye(len(tokens_to_keep))
+      # block loops and pad heads
+      parse_probs = parse_probs * tokens_to_keep * (1-I)
+      parse_preds = np.argmax(parse_probs, axis=1)
+      #return parse_preds
+      tokens = np.arange(1, length)
+      roots = np.where(parse_preds[tokens] == 0)[0]+1
+      # ensure at least one root
+      if len(roots) < 1:
+        # The current root probabilities
+        root_probs = parse_probs[tokens,0]
+        # The current head probabilities
+        old_head_probs = parse_probs[tokens, parse_preds[tokens]]
+        # Get new potential root probabilities
+        new_root_probs = root_probs / old_head_probs
+        # Select the most probable root
+        new_root = tokens[np.argmax(new_root_probs)]
         # Make the change
-        parse_preds[changed_cycle] = new_head
-        tarjan.edges[new_head].add(changed_cycle)
-        tarjan.edges[old_head].remove(changed_cycle)
-    return parse_preds
+        parse_preds[new_root] = 0
+      # ensure at most one root
+      elif len(roots) > 1:
+        # The probabilities of the current heads
+        root_probs = parse_probs[roots,0]
+        # Set the probability of depending on the root zero
+        parse_probs[roots,0] = 0
+        # Get new potential heads and their probabilities
+        new_heads = np.argmax(parse_probs[roots][:,tokens], axis=1)+1
+        new_head_probs = parse_probs[roots, new_heads] / root_probs
+        # Select the most probable root
+        new_root = roots[np.argmin(new_head_probs)]
+        # Make the change
+        parse_preds[roots] = new_heads
+        parse_preds[new_root] = 0
+      # remove cycles
+      tarjan = Tarjan(parse_preds, tokens)
+      cycles = tarjan.SCCs
+      for SCC in tarjan.SCCs:
+        if len(SCC) > 1:
+          dependents = set()
+          to_visit = set(SCC)
+          while len(to_visit) > 0:
+            node = to_visit.pop()
+            if not node in dependents:
+              dependents.add(node)
+              to_visit.update(tarjan.edges[node])
+          # The indices of the nodes that participate in the cycle
+          cycle = np.array(list(SCC))
+          # The probabilities of the current heads
+          old_heads = parse_preds[cycle]
+          old_head_probs = parse_probs[cycle, old_heads]
+          # Set the probability of depending on a non-head to zero
+          non_heads = np.array(list(dependents))
+          parse_probs[np.repeat(cycle, len(non_heads)), np.repeat([non_heads], len(cycle), axis=0).flatten()] = 0
+          # Get new potential heads and their probabilities
+          new_heads = np.argmax(parse_probs[cycle][:,tokens], axis=1)+1
+          new_head_probs = parse_probs[cycle, new_heads] / old_head_probs
+          # Select the most probable change
+          change = np.argmax(new_head_probs)
+          changed_cycle = cycle[change]
+          old_head = old_heads[change]
+          new_head = new_heads[change]
+          # Make the change
+          parse_preds[changed_cycle] = new_head
+          tarjan.edges[new_head].add(changed_cycle)
+          tarjan.edges[old_head].remove(changed_cycle)
+      return parse_preds
+    else:
+      tokens_to_keep[0] = True
+      length = np.sum(tokens_to_keep)
+      # block and pad heads
+      parse_probs = parse_probs * tokens_to_keep
+      parse_preds = np.argmax(parse_probs, axis=1)
+      #return parse_preds
   
   #=============================================================
-  @staticmethod
-  def rel_argmax(rel_probs, tokens_to_keep):
+  def rel_argmax(self, rel_probs, tokens_to_keep):
     """"""
     
-    tokens_to_keep[0] = True
-    rel_probs[:,Vocab.PAD] = 0
-    root = Vocab.ROOT
-    length = np.sum(tokens_to_keep)
-    tokens = np.arange(1, length)
-    rel_preds = np.argmax(rel_probs, axis=1)
-    roots = np.where(rel_preds[tokens] == root)[0]+1
-    if len(roots) < 1:
-      rel_preds[1+np.argmax(rel_probs[tokens,root])] = root
-    elif len(roots) > 1:
-      root_probs = rel_probs[roots, root]
-      rel_probs[roots, root] = 0
-      new_rel_preds = np.argmax(rel_probs[roots], axis=1)
-      new_rel_probs = rel_probs[roots, new_rel_preds] / root_probs
-      new_root = roots[np.argmin(new_rel_probs)]
-      rel_preds[roots] = new_rel_preds
-      rel_preds[new_root] = root
-    return rel_preds
+    if self.ensure_tree:
+      tokens_to_keep[0] = True
+      rel_probs[:,Vocab.PAD] = 0
+      root = Vocab.ROOT
+      length = np.sum(tokens_to_keep)
+      tokens = np.arange(1, length)
+      rel_preds = np.argmax(rel_probs, axis=1)
+      roots = np.where(rel_preds[tokens] == root)[0]+1
+      if len(roots) < 1:
+        rel_preds[1+np.argmax(rel_probs[tokens,root])] = root
+      elif len(roots) > 1:
+        root_probs = rel_probs[roots, root]
+        rel_probs[roots, root] = 0
+        new_rel_preds = np.argmax(rel_probs[roots], axis=1)
+        new_rel_probs = rel_probs[roots, new_rel_preds] / root_probs
+        new_root = roots[np.argmin(new_rel_probs)]
+        rel_preds[roots] = new_rel_preds
+        rel_preds[new_root] = root
+      return rel_preds
+    elif self.ensure_tree:
+      rel_probs[:,Vocab.PAD] = 0
+      rel_preds = np.argmax(rel_probs, axis=1)
+      return rel_preds
   
   #=============================================================
   def __call__(self, inputs, targets, moving_params=None):

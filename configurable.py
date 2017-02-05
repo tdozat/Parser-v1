@@ -125,6 +125,14 @@ class Configurable(object):
     return self._config.getboolean('Dataset', 'cased')
   argparser.add_argument('--cased')
   @property
+  def ensure_tree(self):
+    return self._config.getboolean('Dataset', 'ensure_tree')
+  argparser.add_argument('--ensure_tree')
+  @property
+  def root_label(self):
+    return self._config.getboolean('Dataset', 'root_label')
+  argparser.add_argument('--root_label')
+  @property
   def min_occur_count(self):
     return self._config.getint('Dataset', 'min_occur_count')
   argparser.add_argument('--min_occur_count')

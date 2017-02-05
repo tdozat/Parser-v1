@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# -*- coding: UTF-8 -*-
+ 
 # Copyright 2016 Timothy Dozat
 # 
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,9 +15,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-#!/usr/bin/env python
-# -*- coding: UTF-8 -*-
- 
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

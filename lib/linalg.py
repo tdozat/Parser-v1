@@ -175,19 +175,21 @@ def bilinear(inputs1, inputs2, output_size, add_bias2=True, add_bias1=True, add_
     return bilin
 
 #===============================================================
-def diagonal_bilinear(inputs1, inputs2, output_size, add_bias1=True, add_bias2=True, initializer=None, scope=None, moving_params=None):
+def diagonal_bilinear(inputs1, inputs2, output_size, add_bias2=True, add_bias1=True, add_bias=False, initializer=None, scope=None, moving_params=None):
   """"""
   
-  with tf.variable_scope(scope or 'DiagonalBilinear'):
+  with tf.variable_scope(scope or 'Bilinear'):
     # Reformat the inputs
     ndims = len(inputs1.get_shape().as_list())
     inputs1_shape = tf.shape(inputs1)
-    inputs1_bucket_size = inputs1_shape[ndims-2]
-    inputs1_size = inputs1.get_shape().as_list()[-1]
-    
     inputs2_shape = tf.shape(inputs2)
+    inputs1_bucket_size = inputs1_shape[ndims-2]
     inputs2_bucket_size = inputs2_shape[ndims-2]
+
+    inputs1_size = inputs1.get_shape().as_list()[-1]
     inputs2_size = inputs2.get_shape().as_list()[-1]
+    assert inputs1_size == inputs2_size
+    
     output_shape = []
     batch_size = 1
     for i in xrange(ndims-2):
@@ -199,44 +201,20 @@ def diagonal_bilinear(inputs1, inputs2, output_size, add_bias1=True, add_bias2=T
     output_shape = tf.pack(output_shape)
     inputs1 = tf.reshape(inputs1, tf.pack([batch_size, inputs1_bucket_size, inputs1_size]))
     inputs2 = tf.reshape(inputs2, tf.pack([batch_size, inputs2_bucket_size, inputs2_size]))
+    inputs1.set_shape([tf.Dimension(None)]*2 + [tf.Dimension(inputs1_size)])
+    inputs2.set_shape([tf.Dimension(None)]*2 + [tf.Dimension(inputs2_size)])
     
-    # Get the matrix
-    if initializer is None and moving_params is None:
-      initializer = tf.ones_initializer
-    weights = tf.get_variable('Weights', [output_size, inputs1_size], initializer=initializer)
-    if moving_params is not None:
-      weights = moving_params.average(weights)
-    else:
-      tf.add_to_collection('Weights', weights)
-    
-    # Get the bias
-    if add_bias:
-      bias = tf.get_variable('Biases', [output_size], initializer=tf.zeros_initializer)
-      if moving_params is not None:
-        bias = moving_params.average(bias)
-      bias = tf.reshape(bias, [-1,1])
-    else:
-      bias = 0
-    
-    # Do the multiplications
-    # (bn x 1 x d) (r x d) -> (bn x r x d)
-    lin = tf.reshape(inputs1, [-1, 1, inputs1_size]) * weights
-    # (b x nr x d) (b x n x d)T -> (b x nr x n)
-    bilin = tf.batch_matmul(tf.reshape(lin, tf.pack([batch_size, inputs1_bucket_size*output_size, inputs2_size])),
-                                   inputs2, adj_y=True)
-    # (bn x r x n)
-    bilin = tf.reshape(bilin, tf.pack([-1, output_size, inputs2_bucket_size])) + bias
-    # (b x n x r x n)
-    bilin = tf.reshape(bilin, output_shape)
-    
-    if add_bias1:
-      with tf.variable_scope('Input1_Biases'):
-        inputs1.set_shape([tf.Dimension(None), tf.Dimension(None), tf.Dimension(inputs1_size)])
-        bilin += tf.expand_dims(linear(inputs1, output_size, add_bias=False, moving_params=moving_params), 3)
-    if add_bias2:
-      with tf.variable_scope('Input2_Biases'):
-        inputs2.set_shape([tf.Dimension(None), tf.Dimension(None), tf.Dimension(inputs2_size)])
-        bilin += tf.expand_dims(tf.transpose(linear(inputs2, output_size, add_bias=False, moving_params=moving_params), [0, 2, 1]), 1)
+    inputs = broadcast_mult(inputs1, inputs2)
+    with tf.variable_scope('Bilinear'):
+      bilin = linear(inputs, output_size, add_bias=add_bias, initializer=initializer, scope=scope, moving_params=moving_params)
+    with tf.variable_scope('Linear1'):
+      lin1 = linear(inputs1, output_size, add_bias=False, initializer=initializer, scope=scope, moving_params=moving_params)
+      lin1 = tf.expand_dims(lin1, 2)
+    with tf.variable_scope('Linear2'):
+      lin2 = linear(inputs2, output_size, add_bias=False, initializer=initializer, scope=scope, moving_params=moving_params)
+      lin2 = tf.expand_dims(lin2, 1)
+
+    bilin = tf.transpose(bilin+lin1+lin2, [0,1,3,2])
     
     return bilin
   
@@ -256,6 +234,57 @@ def layer_norm(inputs, beta_start=0, gamma_start=1, scope=None, moving_params=No
     inputs = gamma * (inputs-mean) / tf.sqrt(var+self.epsilon) + beta
     return inputs
   
+#===============================================================
+def broadcast_add(inputs1, inputs2):
+  """"""
+  
+  inputs1_shape = tf.shape(inputs1)
+  inputs_size = inputs1.get_shape().as_list()[-1]
+  inputs2_shape = tf.shape(inputs2)
+  inputs1 = tf.transpose(inputs1, [0,2,1])
+  inputs2 = tf.transpose(inputs2, [0,2,1])
+  inputs1 = tf.reshape(inputs1, tf.pack([-1,inputs1_shape[1],1]))
+  inputs2 = tf.reshape(inputs2, tf.pack([-1,1,inputs2_shape[1]]))
+  inputs = inputs1 + inputs2
+  inputs = tf.reshape(inputs, [inputs1_shape[0], inputs1_shape[2],  inputs1_shape[1], inputs2_shape[1]])
+  inputs = tf.transpose(inputs, [0,2,3,1])
+  inputs.set_shape([tf.Dimension(None)]*3 + [tf.Dimension(inputs_size)])
+  return inputs
+  
+#===============================================================
+def broadcast_sub(inputs1, inputs2):
+  """"""
+  
+  inputs1_shape = tf.shape(inputs1)
+  inputs_size = inputs1.get_shape().as_list()[-1]
+  inputs2_shape = tf.shape(inputs2)
+  inputs1 = tf.transpose(inputs1, [0,2,1])
+  inputs2 = tf.transpose(inputs2, [0,2,1])
+  inputs1 = tf.reshape(inputs1, tf.pack([-1,inputs1_shape[1],1]))
+  inputs2 = tf.reshape(inputs2, tf.pack([-1,1,inputs2_shape[1]]))
+  inputs = inputs1 - inputs2
+  inputs = tf.reshape(inputs, [inputs1_shape[0], inputs1_shape[2], inputs1_shape[1], inputs2_shape[1]])
+  inputs = tf.transpose(inputs, [0,2,3,1])
+  inputs.set_shape([tf.Dimension(None)]*3 + [tf.Dimension(inputs_size)])
+  return inputs
+
+#===============================================================
+def broadcast_mult(inputs1, inputs2):
+  """"""
+  
+  inputs1_shape = tf.shape(inputs1)
+  inputs_size = inputs1.get_shape().as_list()[-1]
+  inputs2_shape = tf.shape(inputs2)
+  inputs1 = tf.transpose(inputs1, [0,2,1])
+  inputs2 = tf.transpose(inputs2, [0,2,1])
+  inputs1 = tf.reshape(inputs1, tf.pack([-1,inputs1_shape[1],1]))
+  inputs2 = tf.reshape(inputs2, tf.pack([-1,1,inputs2_shape[1]]))
+  inputs = inputs1 * inputs2
+  inputs = tf.reshape(inputs, tf.pack([inputs1_shape[0], inputs1_shape[2],  inputs1_shape[1], inputs2_shape[1]]))
+  inputs = tf.transpose(inputs, [0,2,3,1])
+  inputs.set_shape([tf.Dimension(None)]*3 + [tf.Dimension(inputs_size)])
+  return inputs
+
 #***************************************************************
 if __name__ == '__main__':
   """"""

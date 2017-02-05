@@ -53,7 +53,7 @@ class Vocab(Configurable):
     if self.name == 'Tags':
       self.SPECIAL_TOKENS = ('PAD', 'ROOT', 'UNK')
     elif self.name == 'Rels':
-      self.SPECIAL_TOKENS = ('pad', 'root', 'unk')
+      self.SPECIAL_TOKENS = ('pad', self.root_label, 'unk')
     self._counts = Counter()
     self._str2idx = dict(zip(self.SPECIAL_TOKENS, range(Vocab.START_IDX)))
     self._idx2str = dict(zip(range(Vocab.START_IDX), self.SPECIAL_TOKENS))

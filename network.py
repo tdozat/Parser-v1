@@ -411,23 +411,21 @@ if __name__ == '__main__':
   args, extra_args = argparser.parse_known_args()
   cargs = {k: v for (k, v) in vars(Configurable.argparser.parse_args(extra_args)).iteritems() if v is not None}
   if args.random:
-    cargs['train_iters'] = 15000
-    cargs['cased'] = str(bool(np.random.randint(2)))
+    cargs['train_iters'] = 20000
+    cargs['cased'] = False#str(bool(np.random.randint(2)))
     cargs['save_dir'] = 'saves/'+str(int(time.time()*100))
-    cargs['n_recur'] = str(np.random.choice([3,4,5], p=[.25, .5, .25]))
-    cargs['embed_size'] = str(int(10**np.random.uniform(1.5, 2.25)))
-    cargs['recur_size'] = str(int(10**np.random.uniform(2, 3)))
-    cargs['mlp_size'] = str(int(10**np.random.uniform(1.5,2.5)))
-    cargs['word_keep_prob'] = str(np.random.uniform(.75,1.))
-    cargs['tag_keep_prob'] = str(np.random.uniform(.75,1.))
+    cargs['mlp_func'] = 'relu'
+    cargs['n_recur'] = str(np.random.choice([3,4,5], p=[.625, .25, .125]))
+    cargs['embed_size'] = str(int(10**np.random.uniform(1.5, 2.75)))
+    cargs['recur_size'] = str(int(10**np.random.uniform(2.25, 3)))
+    cargs['mlp_size'] = str(int(10**np.random.uniform(2,3)))
+    cargs['word_keep_prob'] = cargs['tag_keep_prob'] = str(np.random.uniform(.7,.9))
     if np.random.randint(2):
-      cargs['mlp_func'] = 'relu'
+      cargs['recur_cell'] = 'CifLSTMCell'
     if np.random.randint(1):
-      cargs['cell_include_prob'] = str(np.random.uniform(.5, 1))
-      cargs['hidden_include_prob'] = str(np.random.uniform(.5, 1))
+      cargs['cell_include_prob'] = cargs['hidden_include_prob'] = str(np.random.uniform(.5, 1))
     else:
-      cargs['ff_keep_prob'] = str(np.random.uniform(.5,.85))
-      cargs['recur_keep_prob'] = str(np.random.uniform(.5,.85))
+      cargs['ff_keep_prob'] = cargs['recur_keep_prob'] =str(np.random.uniform(.67,.85))
     cargs['mlp_keep_prob'] = str(np.random.uniform(.5,.85))
     cargs['decay_steps'] = str(int(np.random.uniform(1000,7500)))
   
