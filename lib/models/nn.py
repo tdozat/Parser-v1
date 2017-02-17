@@ -767,7 +767,7 @@ class NN(Configurable):
       # block and pad heads
       parse_probs = parse_probs * tokens_to_keep
       parse_preds = np.argmax(parse_probs, axis=1)
-      #return parse_preds
+      return parse_preds
   
   #=============================================================
   def rel_argmax(self, rel_probs, tokens_to_keep):
@@ -792,7 +792,7 @@ class NN(Configurable):
         rel_preds[roots] = new_rel_preds
         rel_preds[new_root] = root
       return rel_preds
-    elif self.ensure_tree:
+    else:
       rel_probs[:,Vocab.PAD] = 0
       rel_preds = np.argmax(rel_probs, axis=1)
       return rel_preds

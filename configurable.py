@@ -130,7 +130,7 @@ class Configurable(object):
   argparser.add_argument('--ensure_tree')
   @property
   def root_label(self):
-    return self._config.getboolean('Dataset', 'root_label')
+    return self._config.get('Dataset', 'root_label')
   argparser.add_argument('--root_label')
   @property
   def min_occur_count(self):

@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# -*- coding: UTF-8 -*-
+ 
 # Copyright 2016 Timothy Dozat
 # 
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,9 +15,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-#!/usr/bin/env python
-# -*- coding: UTF-8 -*-
- 
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -23,6 +23,7 @@ import numpy as np
 import tensorflow as tf
 
 from vocab import Vocab
+from lib.linalg import linear
 from lib.models.parsers.base_parser import BaseParser
 
 #***************************************************************
@@ -43,13 +44,31 @@ class KGParser(BaseParser):
     self.n_tokens = tf.reduce_sum(self.sequence_lengths)
     self.moving_params = moving_params
     
-    word_inputs = vocabs[0].embedding_lookup(inputs[:,:,0], inputs[:,:,1], moving_params=self.moving_params)
+    word_inputs, pret_inputs = vocabs[0].embedding_lookup(inputs[:,:,0], inputs[:,:,1], moving_params=self.moving_params)
     tag_inputs  = vocabs[1].embedding_lookup(inputs[:,:,2], moving_params=self.moving_params)
     
-    top_recur = self.embed_concat(word_inputs, tag_inputs)
+    embed_inputs = top_recur = self.embed_concat(word_inputs+pret_inputs, tag_inputs)
+    if self.moving_params is None:
+      if self.drop_gradually:
+        s = self.global_sigmoid
+        keep_prob = s + (1-s)*self.ff_keep_prob
+      else:
+        keep_prob = self.ff_keep_prob
+    else:
+      keep_prob = 1.
+    batch_size = tf.shape(inputs)[0]
     for i in xrange(self.n_recur):
+      if self.moving_params is None:
+        input_size = top_recur.get_shape().as_list()[-1]
+        fw_keep_mask = tf.nn.dropout(tf.ones(tf.pack([batch_size, input_size])), keep_prob=keep_prob)
+        if self.recur_bidir:
+          bw_keep_mask = tf.nn.dropout(tf.ones(tf.pack([batch_size, input_size])), keep_prob=keep_prob)
+        else:
+          bw_keep_mask = None
+      else:
+        fw_keep_mask = bw_keep_mask = None
       with tf.variable_scope('RNN%d' % i, reuse=reuse):
-        top_recur, _ = self.RNN(top_recur)
+        top_recur, _ = self.RNN(top_recur, fw_keep_mask=fw_keep_mask, bw_keep_mask=bw_keep_mask)
     
     top_mlp = top_recur
     with tf.variable_scope('MLP0', reuse=reuse):
@@ -84,10 +103,8 @@ class KGParser(BaseParser):
     output['accuracy'] = output['n_correct'] / output['n_tokens']
     output['loss'] = parse_output['loss'] + rel_output['loss'] 
     
-    output['embed'] = tf.pack([word_inputs, tag_inputs])
+    output['embed'] = embed_inputs
     output['recur'] = top_recur
-    output['parse_mlp'] = parse_mlp
-    output['rel_mlp'] = rel_mlp
     output['parse_logits'] = parse_logits
     output['rel_logits'] = rel_logits
     return output

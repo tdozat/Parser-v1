@@ -17,6 +17,7 @@ from stupid_parser import StupidParser
 from diag_parser import DiagParser
 from notag_parser import NoTagParser
 from kg_parser import KGParser
+from dblstm_parser import DBLSTMParser
 # Experimental stuff
 try:
   from parser1 import Parser1
