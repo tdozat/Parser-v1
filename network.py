@@ -113,63 +113,6 @@ class Network(Configurable):
   
   #=============================================================
   # assumes the sess has already been initialized
-  def pretrain(self, sess):
-    """"""
-    
-    saver = tf.train.Saver(self.save_vars, max_to_keep=1)
-    
-    print_every = self.print_every
-    pretrain_iters = self.pretrain_iters
-    try:
-      pretrain_time = 0
-      pretrain_loss = 0
-      pretrain_recur_loss = 0
-      pretrain_covar_loss = 0
-      pretrain_ortho_loss = 0
-      n_pretrain_sents = 0
-      n_pretrain_iters = 0
-      total_pretrain_iters = 0
-      while total_pretrain_iters < pretrain_iters:
-        for j, (feed_dict, sents) in enumerate(self.train_minibatches()):
-          inputs = feed_dict[self._trainset.inputs]
-          targets = feed_dict[self._trainset.targets]
-          start_time = time.time()
-          _, loss, recur_loss, covar_loss, ortho_loss = sess.run(self.ops['pretrain_op'], feed_dict=feed_dict)
-          pretrain_time += time.time() - start_time
-          pretrain_loss += loss
-          pretrain_recur_loss += recur_loss
-          pretrain_covar_loss += covar_loss
-          pretrain_ortho_loss += ortho_loss
-          n_pretrain_sents += len(targets)
-          n_pretrain_iters += 1
-          total_pretrain_iters += 1
-          if j % print_every == 0:
-            pretrain_time = n_pretrain_sents / pretrain_time
-            pretrain_loss /= n_pretrain_iters
-            pretrain_recur_loss /= n_pretrain_iters
-            pretrain_covar_loss /= n_pretrain_iters
-            pretrain_ortho_loss /= n_pretrain_iters
-            print('%6d) Pretrain loss: %.2e (%.2e + %.2e + %.2e)    Pretrain rate: %6.1f sents/sec' % (total_pretrain_iters, pretrain_loss, recur_loss, covar_loss, ortho_loss, pretrain_time))
-            pretrain_time = 0
-            pretrain_loss = 0
-            pretrain_recur_loss = 0
-            pretrain_covar_loss = 0
-            pretrain_ortho_loss = 0
-            n_pretrain_sents = 0
-            n_pretrain_iters = 0
-    except KeyboardInterrupt:
-      try:
-        raw_input('\nPress <Enter> to save or <Ctrl-C> to exit')
-      except:
-        print('\r', end='')
-        sys.exit(0)
-    saver.save(sess, os.path.join(self.save_dir, self.name.lower() + '-pretrained'),
-               latest_filename=self.name.lower()+'-checkpoint',
-               write_meta_graph=False)
-    return
-  
-  #=============================================================
-  # assumes the sess has already been initialized
   def train(self, sess):
     """"""
     
@@ -358,32 +301,14 @@ class Network(Configurable):
     optimizer = optimizers.RadamOptimizer(self._config, global_step=self.global_step)
     train_output = self._model(self._trainset)
     
-    l2_loss = self.l2_reg * tf.add_n([tf.nn.l2_loss(matrix) for matrix in tf.get_collection('Weights')]) if self.l2_reg else self.model.ZERO
-    recur_loss = self.recur_reg * tf.add_n(tf.get_collection('recur_losses')) if self.recur_reg else self.model.ZERO
-    covar_loss = self.covar_reg * tf.add_n(tf.get_collection('covar_losses')) if self.covar_reg else self.model.ZERO
-    ortho_loss = self.ortho_reg * tf.add_n(tf.get_collection('ortho_losses')) if self.ortho_reg else self.model.ZERO
-    regularization_loss = recur_loss + covar_loss + ortho_loss
-    if self.recur_reg or self.covar_reg or self.ortho_reg or 'pretrain_loss' in train_output:
-      optimizer2 = optimizers.RadamOptimizer(self._config)
-      pretrain_loss = train_output.get('pretrain_loss', self.model.ZERO)
-      pretrain_op = optimizer2.minimize(pretrain_loss+regularization_loss)
-    else:
-      pretrain_loss = self.model.ZERO
-      pretrain_op = self.model.ZERO
-      
-    train_op = optimizer.minimize(train_output['loss']+l2_loss+regularization_loss)
+    train_op = optimizer.minimize(train_output['loss'])
     # These have to happen after optimizer.minimize is called
     valid_output = self._model(self._validset, moving_params=optimizer)
     test_output = self._model(self._testset, moving_params=optimizer)
     
     ops = {}
-    ops['pretrain_op'] = [pretrain_op,
-                          pretrain_loss,
-                          recur_loss,
-                          covar_loss,
-                          ortho_loss]
     ops['train_op'] = [train_op,
-                       train_output['loss']+l2_loss+regularization_loss,
+                       train_output['loss'],
                        train_output['n_correct'],
                        train_output['n_tokens']]
     ops['valid_op'] = [valid_output['loss'],
@@ -429,7 +354,6 @@ if __name__ == '__main__':
   import argparse
   
   argparser = argparse.ArgumentParser()
-  argparser.add_argument('--pretrain', action='store_true')
   argparser.add_argument('--test', action='store_true')
   argparser.add_argument('--load', action='store_true')
   argparser.add_argument('--model', default='Parser')
@@ -452,8 +376,6 @@ if __name__ == '__main__':
   config_proto.gpu_options.per_process_gpu_memory_fraction = network.per_process_gpu_memory_fraction
   with tf.Session(config=config_proto) as sess:
     sess.run(tf.initialize_all_variables())
-    if args.pretrain:
-      network.pretrain(sess)
     if not (args.test or args.matrix):
       if args.load:
         os.system('echo Training: > %s/HEAD' % network.save_dir)
