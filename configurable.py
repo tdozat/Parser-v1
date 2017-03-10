@@ -137,18 +137,6 @@ class Configurable(object):
     return self._config.getboolean('Dataset', 'add_to_pretrained')
   argparser.add_argument('--add_to_pretrained')
   @property
-  def char_based(self):
-    return self._config.getboolean('Dataset', 'char_based')
-  argparser.add_argument('--char_based')
-  @property
-  def attn_based(self):
-    return self._config.getboolean('Dataset', 'attn_based')
-  argparser.add_argument('--attn_based')
-  @property
-  def n_bytepairs(self):
-    return self._config.getint('Dataset', 'n_bytepairs')
-  argparser.add_argument('--n_bytepairs')
-  @property
   def min_occur_count(self):
     return self._config.getint('Dataset', 'min_occur_count')
   argparser.add_argument('--min_occur_count')
@@ -176,31 +164,14 @@ class Configurable(object):
     return self._config.getint('Layers', 'n_recur')
   argparser.add_argument('--n_recur')
   @property
-  def n_char_recur(self):
-    return self._config.getint('Layers', 'n_char_recur')
-  argparser.add_argument('--n_char_recur')
-  @property
   def recur_cell(self):
     from lib import rnn_cells
     return getattr(rnn_cells, self._config.get('Layers', 'recur_cell'))
   argparser.add_argument('--recur_cell')
   @property
-  def char_recur_cell(self):
-    from lib import rnn_cells
-    return getattr(rnn_cells, self._config.get('Layers', 'char_recur_cell'))
-  argparser.add_argument('--char_recur_cell')
-  @property
   def recur_bidir(self):
     return self._config.getboolean('Layers', 'recur_bidir')
   argparser.add_argument('--recur_bidir')
-  @property
-  def recur_diag_bilin(self):
-    return self._config.getboolean('Layers', 'recur_diag_bilin')
-  argparser.add_argument('--recur_diag_bilin')
-  @property
-  def char_recur_bidir(self):
-    return self._config.getboolean('Layers', 'char_recur_bidir')
-  argparser.add_argument('--char_recur_bidir')
   @property
   def forget_bias(self):
     if self._config.get('Layers', 'forget_bias') == 'None':
@@ -220,10 +191,6 @@ class Configurable(object):
   def recur_size(self):
     return self._config.getint('Sizes', 'recur_size')
   argparser.add_argument('--recur_size')
-  @property
-  def char_recur_size(self):
-    return self._config.getint('Sizes', 'char_recur_size')
-  argparser.add_argument('--char_recur_size')
   @property
   def attn_mlp_size(self):
     return self._config.getint('Sizes', 'attn_mlp_size')
@@ -256,13 +223,6 @@ class Configurable(object):
       return tf.identity
     elif func == 'leaky_relu':
       return lambda x: tf.maximum(.1*x, x)
-    elif func == 'gated_tanh':
-      from lib.linalg import tanh, sigmoid
-      def gated_tanh(inputs):
-        dim = len(inputs.get_shape().as_list())-1
-        cell_act, output_act = tf.split(dim, 2, inputs)
-        return sigmoid(output_act) * tanh(cell_act)
-      return gated_tanh
     else:
       return getattr(tf.nn, func)
   argparser.add_argument('--info_func')
@@ -273,20 +233,6 @@ class Configurable(object):
       return tf.identity
     elif func == 'leaky_relu':
       return lambda x: tf.maximum(.1*x, x)
-    elif func == 'gated_tanh':
-      from lib.linalg import tanh, sigmoid
-      def gated_tanh(inputs):
-        dim = len(inputs.get_shape().as_list())-1
-        cell_act, output_act = tf.split(dim, 2, inputs)
-        return sigmoid(output_act) * tanh(cell_act)
-      return gated_tanh
-    elif func == 'gated_identity':
-      from lib.linalg import tanh, sigmoid
-      def gated_identity(inputs):
-        dim = len(inputs.get_shape().as_list())-1
-        cell_act, output_act = tf.split(dim, 2, inputs)
-        return sigmoid(output_act) * cell_act
-      return gated_identity
     else:
       return getattr(tf.nn, func)
   argparser.add_argument('--mlp_func')
@@ -294,37 +240,12 @@ class Configurable(object):
   #=============================================================
   # [Regularization]
   @property
-  def l2_reg(self):
-    return self._config.getfloat('Regularization', 'l2_reg')
-  argparser.add_argument('--l2_reg')
-  @property
   def word_l2_reg(self):
     return self._config.getfloat('Regularization', 'word_l2_reg')
   argparser.add_argument('--word_l2_reg')
-  @property
-  def recur_reg(self):
-    return self._config.getfloat('Regularization', 'recur_reg')
-  argparser.add_argument('--recur_reg')
-  @property
-  def covar_reg(self):
-    return self._config.getfloat('Regularization', 'covar_reg')
-  argparser.add_argument('--covar_reg')
-  @property
-  def ortho_reg(self):
-    return self._config.getfloat('Regularization', 'ortho_reg')
-  argparser.add_argument('--ortho_reg')
   
   #=============================================================
   # [Dropout]
-  @property
-  def drop_gradually(self):
-    return self._config.getboolean('Dropout', 'drop_gradually')
-  argparser.add_argument('--drop_gradually')
-  # TODO don't pass keep probabilities to dynamic_rnn, only pass in the mask, which is to be computed in parser.py
-  @property
-  def same_mask(self):
-    return self._config.getboolean('Dropout', 'same_mask')
-  argparser.add_argument('--same_mask')
   @property
   def word_keep_prob(self):
     return self._config.getfloat('Dropout', 'word_keep_prob')

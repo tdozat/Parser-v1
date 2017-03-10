@@ -32,10 +32,13 @@ class BaseCell(Configurable):
     """"""
     
     input_size = kwargs.pop('input_size', None)
+    output_size = kwargs.pop('output_size', None)
+    recur_diag_bilin = kwargs.pop('recur_diag_bilin', False)
     self.moving_params = kwargs.pop('moving_params', None)
     super(BaseCell, self).__init__(*args, **kwargs)
-    self._output_size = self.recur_size
+    self._output_size = output_size if output_size is not None else self.recur_size
     self._input_size = input_size if input_size is not None else self.output_size
+    self._recur_diag_bilin = recur_diag_bilin
   
   #=============================================================
   def __call__(self, inputs, state, scope=None):
@@ -62,6 +65,9 @@ class BaseCell(Configurable):
   @property
   def output_size(self):
     return self._output_size
+  @property
+  def recur_diag_bilin(self):
+    return self._recur_diag_bilin
   @property
   def state_size(self):
     raise NotImplementedError()

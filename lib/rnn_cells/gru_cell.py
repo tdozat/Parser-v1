@@ -43,11 +43,11 @@ class GRUCell(BaseCell):
         update_act, reset_act = linear
         update_gate = linalg.sigmoid(update_act-self.forget_bias)
         reset_gate = linalg.sigmoid(reset_act)
-        reset_state = reset_gate * hidden_tm1 
+        reset_state = reset_gate * hidden_tm1
       with tf.variable_scope('Candidate'):
         hidden_act = linalg.linear([inputs, reset_state],
                                    self.output_size,
-                                   add_bias=False,
+                                   add_bias=True,
                                    moving_params=self.moving_params)
         hidden_tilde = self.recur_func(hidden_act)
       cell_t = update_gate * cell_tm1 + (1-update_gate) * hidden_tilde

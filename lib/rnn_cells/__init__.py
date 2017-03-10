@@ -19,3 +19,5 @@ from rnn_cell import RNNCell
 from gru_cell import GRUCell
 from cif_lstm_cell import CifLSTMCell
 from lstm_cell import LSTMCell
+from my_lstm_cell import MyLSTMCell
+from noi_lstm_cell import NoiLSTMCell
