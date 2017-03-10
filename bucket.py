@@ -23,6 +23,8 @@ import numpy as np
 import tensorflow as tf
 
 from configurable import Configurable
+from lib.linalg import linear
+from lib.models.nn import NN
 
 #***************************************************************
 class Bucket(Configurable):
@@ -36,16 +38,19 @@ class Bucket(Configurable):
     self._size = None
     self._data = None
     self._sents = None
-    
     return
   
   #=============================================================
-  def reset(self, size):
+  def reset(self, size, pad=False):
     """"""
     
     self._size = size
-    self._data = []
-    self._sents = []
+    if pad:
+      self._data = [(0,)]
+      self._sents = [('',)]
+    else:
+      self._data = []
+      self._sents = []
     return
   
   #=============================================================

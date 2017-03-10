@@ -13,17 +13,6 @@
 # limitations under the License.
 
 from parser import Parser
-from stupid_parser import StupidParser
-from diag_parser import DiagParser
+from shallow_parser import ShallowParser
 from notag_parser import NoTagParser
 from kg_parser import KGParser
-from dblstm_parser import DBLSTMParser
-# Experimental stuff
-try:
-  from parser1 import Parser1
-  from parser2 import Parser2
-  from parser3 import Parser3
-  from parser4 import Parser4
-  from parser5 import Parser5
-except ImportError:
-  pass

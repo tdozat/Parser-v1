@@ -20,6 +20,7 @@ from __future__ import division
 from __future__ import print_function
 
 import os
+import sys
 from collections import Counter
 
 import numpy as np
@@ -27,7 +28,6 @@ import tensorflow as tf
 
 from configurable import Configurable
 
-# TODO MetaVocab?
 #***************************************************************
 class Vocab(Configurable):
   """"""
@@ -42,9 +42,9 @@ class Vocab(Configurable):
     
     self._vocab_file = vocab_file
     self._conll_idx = conll_idx
-    load_embed_file = kwargs.pop('load_embed_file', False)
     global_step = kwargs.pop('global_step', None)
     cased = kwargs.pop('cased', None)
+    self._use_pretrained = kwargs.pop('use_pretrained', False)
     super(Vocab, self).__init__(*args, **kwargs)
     if cased is None:
       self._cased = super(Vocab, self).cased
@@ -54,19 +54,22 @@ class Vocab(Configurable):
       self.SPECIAL_TOKENS = ('PAD', 'ROOT', 'UNK')
     elif self.name == 'Rels':
       self.SPECIAL_TOKENS = ('pad', self.root_label, 'unk')
+    
     self._counts = Counter()
-    self._str2idx = dict(zip(self.SPECIAL_TOKENS, range(Vocab.START_IDX)))
-    self._idx2str = dict(zip(range(Vocab.START_IDX), self.SPECIAL_TOKENS))
-    self._str2embed = {}
-    self._embed2str = {}
+    self._str2idx = {}
+    self._idx2str = {}
     self.trainable_embeddings = None
-    self.pretrained_embeddings = None
+    if self.use_pretrained:
+      self._str2embed = {}
+      self._embed2str = {}
+      self.pretrained_embeddings = None
+    
     if os.path.isfile(self.vocab_file):
       self.load_vocab_file()
     else:
       self.add_train_file()
       self.save_vocab_file()
-    if load_embed_file:
+    if self.use_pretrained:
       self.load_embed_file()
     self._finalize()
     
@@ -77,59 +80,58 @@ class Vocab(Configurable):
     return
   
   #=============================================================
-  def add(self, word, count=1):
+  def add(self, counts, word, count=1):
     """"""
     
     if not self.cased:
       word = word.lower()
     
-    self._counts[word] += int(count)
+    counts[word] += int(count)
     return
   
   #=============================================================
-  def update(self, iterable):
-    """"""
-    
-    for elt in iterable:
-      if isinstance(elt, basestring):
-        self.add(elt)
-      elif isinstance(iterable, dict):
-        self.add(elt, iterable[elt])
-      elif isinstance(elt, (tuple, list)) and len(elt) == 2:
-        self.add(*elt)
-      else:
-        raise ValueError('WTF did you just pass to Vocab.update?')
-    return
+  def init_str2idx(self):
+    return dict(zip(self.SPECIAL_TOKENS, range(Vocab.START_IDX)))
+  def init_idx2str(self):
+    return dict(zip(range(Vocab.START_IDX), self.SPECIAL_TOKENS))
   
   #=============================================================
-  def index_vocab(self):
+  def index_vocab(self, counts):
     """"""
     
+    str2idx = self.init_str2idx()
+    idx2str = self.init_idx2str()
     cur_idx = Vocab.START_IDX
+    for word, count in self.sorted_vocab(counts):
+      if (count >= self.min_occur_count) and word not in str2idx:
+        str2idx[word] = cur_idx
+        idx2str[cur_idx] = word
+        cur_idx += 1
+    return str2idx, idx2str
+  
+  #=============================================================
+  @staticmethod
+  def sorted_vocab(counts):
+    """"""
+    
     buff = []
-    for word_and_count in self._counts.most_common():
+    partial = []
+    words_and_counts = counts.most_common()
+    words_and_counts.append( (None, None) )
+    for word_and_count in words_and_counts:
       if (not buff) or buff[-1][1] == word_and_count[1]:
         buff.append(word_and_count)
       else:
         buff.sort()
-        for word, count in buff: 
-          if count >= self.min_occur_count and word not in self._str2idx:
-            self._str2idx[word] = cur_idx
-            self._idx2str[cur_idx] = word
-            cur_idx += 1
+        partial.extend(buff)
         buff = [word_and_count]
-    buff.sort()
-    for word, count in buff: 
-      if count >= self.min_occur_count and word not in self._str2idx:
-        self._str2idx[word] = cur_idx
-        self._idx2str[cur_idx] = word
-        cur_idx += 1
-    return
+    return partial
   
   #=============================================================
   def add_train_file(self):
     """"""
     
+    counts = Counter()
     with open(self.train_file) as f:
       buff = []
       for line_num, line in enumerate(f):
@@ -138,20 +140,22 @@ class Vocab(Configurable):
           if len(line) == 10:
             if hasattr(self.conll_idx, '__iter__'):
               for idx in self.conll_idx:
-                self.add(line[idx])
+                self.add(counts, line[idx])
             else:
-              self.add(line[self.conll_idx])
+              self.add(counts, line[self.conll_idx])
           else:
             raise ValueError('The training file is misformatted at line %d' % (line_num+1))
-    self.index_vocab()
+
+    self._counts = counts
+    self._str2idx, self._idx2str = self.index_vocab(counts)
     return
-  
+
   #=============================================================
   def load_embed_file(self):
     """"""
     
-    self._str2embed = dict(zip(self.SPECIAL_TOKENS, range(Vocab.START_IDX)))
-    self._embed2str = dict(zip(range(Vocab.START_IDX), self.SPECIAL_TOKENS))
+    self._str2embed = self.init_str2idx()
+    self._embed2str = self.init_idx2str()
     embeds = []
     with open(self.embed_file) as f:
       cur_idx = Vocab.START_IDX
@@ -180,44 +184,31 @@ class Vocab(Configurable):
     return
   
   #=============================================================
-  def load_vocab_file(self):
-    """"""
-    
-    with open(self.vocab_file) as f:
-      for line_num, line in enumerate(f):
-        line = line.strip().split()
-        if line:
-          if len(line) == 1:
-            line.insert(0, '')
-          if len(line) == 2:
-            self.add(*line)
-          else:
-            raise ValueError('The vocab file is misformatted at line %d' % (line_num+1))
-    self.index_vocab()
-  
-  #=============================================================
   def save_vocab_file(self):
     """"""
     
     with open(self.vocab_file, 'w') as f:
-      for word_and_count in self._counts.most_common():
-        f.write('%s\t%d\n' % (word_and_count))
+      for word, count in self.sorted_vocab(self._counts):
+        f.write('%s\t%d\n' % (word, count))
     return
   
   #=============================================================
-  @staticmethod
-  def idxs2str(indices):
+  def load_vocab_file(self):
     """"""
     
-    shape = Configurable.tupleshape(indices)
-    if len(shape) == 2:
-      return ' '.join(':'.join(str(subidx) for subidx in index) if index[0] == Vocab.UNK else str(index[0]) for index in indices)
-    elif len(shape) == 1:
-      return ' '.join(str(index) for index in indices)
-    elif len(shape) == 0:
-      return ''
-    else:
-      raise ValueError('Indices should have len(shape) 1 or 2, not %d' % len(shape))
+    counts = Counter()
+    with open(self.vocab_file) as f:
+      for line_num, line in enumerate(f):
+        line = line.strip().split('\t')
+        if line:
+          if len(line) == 1:
+            line.insert(0, '')
+          if len(line) == 2:
+            self.add(counts, line[0], line[1])
+          else:
+            raise ValueError('The vocab file is misformatted at line %d' % (line_num+1))
+    self._counts = counts
+    self._str2idx, self._idx2str = self.index_vocab(counts)
     return
   
   #=============================================================
@@ -230,17 +221,17 @@ class Vocab(Configurable):
   def _finalize(self):
     """"""
     
-    if self.pretrained_embeddings is None:
-      initializer = tf.random_normal_initializer()
-      embed_size = self.embed_size
-    else:
+    if self.use_pretrained:
       initializer = tf.zeros_initializer
       embed_size = self.pretrained_embeddings.shape[1]
+    else:
+      initializer = tf.random_normal_initializer()
+      embed_size = self.embed_size
     
     with tf.device('/cpu:0'):
       with tf.variable_scope(self.name):
         self.trainable_embeddings = tf.get_variable('Trainable', shape=(len(self._str2idx), embed_size), initializer=initializer)
-        if self.pretrained_embeddings is not None:
+        if self.use_pretrained:
           self.pretrained_embeddings /= np.std(self.pretrained_embeddings)
           self.pretrained_embeddings = tf.Variable(self.pretrained_embeddings, trainable=False, name='Pretrained')
     return
@@ -253,11 +244,11 @@ class Vocab(Configurable):
       trainable_embeddings = moving_params.average(self.trainable_embeddings)
     else:
       trainable_embeddings = self.trainable_embeddings
-      
+    
     embed_input = tf.nn.embedding_lookup(trainable_embeddings, inputs)
     if moving_params is None:
       tf.add_to_collection('Weights', embed_input)
-    if self.pretrained_embeddings is not None and pret_inputs is not None:
+    if self.use_pretrained and pret_inputs is not None:
       return embed_input, tf.nn.embedding_lookup(self.pretrained_embeddings, pret_inputs)
     else:
       return embed_input
@@ -289,6 +280,9 @@ class Vocab(Configurable):
   def vocab_file(self):
     return self._vocab_file
   @property
+  def use_pretrained(self):
+    return self._use_pretrained
+  @property
   def cased(self):
     return self._cased
   @property
@@ -311,12 +305,12 @@ class Vocab(Configurable):
     if isinstance(key, basestring):
       if not self.cased:
         key = key.lower()
-      if self._str2embed:
-        return (self._str2idx.get(key, Vocab.UNK), self._str2embed.get(key.lower(), Vocab.UNK))
+      if self.use_pretrained:
+        return (self._str2idx.get(key, self.UNK), self._str2embed.get(key, self.UNK))
       else:
-        return (self._str2idx.get(key, Vocab.UNK),)
+        return (self._str2idx.get(key, self.UNK),)
     elif isinstance(key, (int, long, np.int32, np.int64)):
-      return self._idx2str.get(key, self.SPECIAL_TOKENS[Vocab.UNK])
+      return self._idx2str.get(key, self.SPECIAL_TOKENS[self.UNK])
     elif hasattr(key, '__iter__'):
       return tuple(self[k] for k in key)
     else:
@@ -339,5 +333,4 @@ class Vocab(Configurable):
   
   def __iter__(self):
     return (key for key in self._str2idx)
-  
   

@@ -36,7 +36,7 @@ class Configurable(object):
     
     self._name = kwargs.pop('name', type(self).__name__)
     if args and kwargs:
-      raise Typeerror('Configurables must take either a config parser or keyword args')
+      raise TypeError('Configurables must take either a config parser or keyword args')
     if args:
       if len(args) > 1:
         raise TypeError('Configurables take at most one argument')
@@ -133,6 +133,22 @@ class Configurable(object):
     return self._config.get('Dataset', 'root_label')
   argparser.add_argument('--root_label')
   @property
+  def add_to_pretrained(self):
+    return self._config.getboolean('Dataset', 'add_to_pretrained')
+  argparser.add_argument('--add_to_pretrained')
+  @property
+  def char_based(self):
+    return self._config.getboolean('Dataset', 'char_based')
+  argparser.add_argument('--char_based')
+  @property
+  def attn_based(self):
+    return self._config.getboolean('Dataset', 'attn_based')
+  argparser.add_argument('--attn_based')
+  @property
+  def n_bytepairs(self):
+    return self._config.getint('Dataset', 'n_bytepairs')
+  argparser.add_argument('--n_bytepairs')
+  @property
   def min_occur_count(self):
     return self._config.getint('Dataset', 'min_occur_count')
   argparser.add_argument('--min_occur_count')
@@ -160,18 +176,31 @@ class Configurable(object):
     return self._config.getint('Layers', 'n_recur')
   argparser.add_argument('--n_recur')
   @property
-  def n_mlp(self):
-    return self._config.getint('Layers', 'n_mlp')
-  argparser.add_argument('--n_mlp')
+  def n_char_recur(self):
+    return self._config.getint('Layers', 'n_char_recur')
+  argparser.add_argument('--n_char_recur')
   @property
   def recur_cell(self):
     from lib import rnn_cells
     return getattr(rnn_cells, self._config.get('Layers', 'recur_cell'))
   argparser.add_argument('--recur_cell')
   @property
+  def char_recur_cell(self):
+    from lib import rnn_cells
+    return getattr(rnn_cells, self._config.get('Layers', 'char_recur_cell'))
+  argparser.add_argument('--char_recur_cell')
+  @property
   def recur_bidir(self):
     return self._config.getboolean('Layers', 'recur_bidir')
   argparser.add_argument('--recur_bidir')
+  @property
+  def recur_diag_bilin(self):
+    return self._config.getboolean('Layers', 'recur_diag_bilin')
+  argparser.add_argument('--recur_diag_bilin')
+  @property
+  def char_recur_bidir(self):
+    return self._config.getboolean('Layers', 'char_recur_bidir')
+  argparser.add_argument('--char_recur_bidir')
   @property
   def forget_bias(self):
     if self._config.get('Layers', 'forget_bias') == 'None':
@@ -192,9 +221,21 @@ class Configurable(object):
     return self._config.getint('Sizes', 'recur_size')
   argparser.add_argument('--recur_size')
   @property
-  def mlp_size(self):
-    return self._config.getint('Sizes', 'mlp_size')
-  argparser.add_argument('--mlp_size')
+  def char_recur_size(self):
+    return self._config.getint('Sizes', 'char_recur_size')
+  argparser.add_argument('--char_recur_size')
+  @property
+  def attn_mlp_size(self):
+    return self._config.getint('Sizes', 'attn_mlp_size')
+  argparser.add_argument('--attn_mlp_size')
+  @property
+  def class_mlp_size(self):
+    return self._config.getint('Sizes', 'class_mlp_size')
+  argparser.add_argument('--class_mlp_size')
+  @property
+  def info_mlp_size(self):
+    return self._config.getint('Sizes', 'info_mlp_size')
+  argparser.add_argument('--info_mlp_size')
   
   #=============================================================
   # [Functions]
@@ -203,14 +244,49 @@ class Configurable(object):
     func = self._config.get('Functions', 'recur_func')
     if func == 'identity':
       return tf.identity
+    elif func == 'leaky_relu':
+      return lambda x: tf.maximum(.1*x, x)
     else:
       return getattr(tf.nn, func)
   argparser.add_argument('--recur_func')
+  @property
+  def info_func(self):
+    func = self._config.get('Functions', 'info_func')
+    if func == 'identity':
+      return tf.identity
+    elif func == 'leaky_relu':
+      return lambda x: tf.maximum(.1*x, x)
+    elif func == 'gated_tanh':
+      from lib.linalg import tanh, sigmoid
+      def gated_tanh(inputs):
+        dim = len(inputs.get_shape().as_list())-1
+        cell_act, output_act = tf.split(dim, 2, inputs)
+        return sigmoid(output_act) * tanh(cell_act)
+      return gated_tanh
+    else:
+      return getattr(tf.nn, func)
+  argparser.add_argument('--info_func')
   @property
   def mlp_func(self):
     func = self._config.get('Functions', 'mlp_func')
     if func == 'identity':
       return tf.identity
+    elif func == 'leaky_relu':
+      return lambda x: tf.maximum(.1*x, x)
+    elif func == 'gated_tanh':
+      from lib.linalg import tanh, sigmoid
+      def gated_tanh(inputs):
+        dim = len(inputs.get_shape().as_list())-1
+        cell_act, output_act = tf.split(dim, 2, inputs)
+        return sigmoid(output_act) * tanh(cell_act)
+      return gated_tanh
+    elif func == 'gated_identity':
+      from lib.linalg import tanh, sigmoid
+      def gated_identity(inputs):
+        dim = len(inputs.get_shape().as_list())-1
+        cell_act, output_act = tf.split(dim, 2, inputs)
+        return sigmoid(output_act) * cell_act
+      return gated_identity
     else:
       return getattr(tf.nn, func)
   argparser.add_argument('--mlp_func')
@@ -221,6 +297,10 @@ class Configurable(object):
   def l2_reg(self):
     return self._config.getfloat('Regularization', 'l2_reg')
   argparser.add_argument('--l2_reg')
+  @property
+  def word_l2_reg(self):
+    return self._config.getfloat('Regularization', 'word_l2_reg')
+  argparser.add_argument('--word_l2_reg')
   @property
   def recur_reg(self):
     return self._config.getfloat('Regularization', 'recur_reg')
@@ -277,6 +357,10 @@ class Configurable(object):
   def mlp_keep_prob(self):
     return self._config.getfloat('Dropout', 'mlp_keep_prob')
   argparser.add_argument('--mlp_keep_prob')
+  @property
+  def info_keep_prob(self):
+    return self._config.getfloat('Dropout', 'info_keep_prob')
+  argparser.add_argument('--info_keep_prob')
   
   #=============================================================
   # [Learning rate]

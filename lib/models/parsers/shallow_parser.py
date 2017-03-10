@@ -1,17 +1,3 @@
-# Copyright 2016 Timothy Dozat
-# 
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-# 
-#     http://www.apache.org/licenses/LICENSE-2.0
-# 
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 #!/usr/bin/env python
 # -*- coding: UTF-8 -*-
  
@@ -26,7 +12,8 @@ from vocab import Vocab
 from lib.models.parsers.base_parser import BaseParser
 
 #***************************************************************
-class KGParser(BaseParser):
+# TODO try applying recur_diag_bilin to last layer only
+class ShallowParser(BaseParser):
   """"""
   
   #=============================================================
@@ -44,46 +31,53 @@ class KGParser(BaseParser):
     self.moving_params = moving_params
     
     word_inputs, pret_inputs = vocabs[0].embedding_lookup(inputs[:,:,0], inputs[:,:,1], moving_params=self.moving_params)
-    tag_inputs  = vocabs[1].embedding_lookup(inputs[:,:,2], moving_params=self.moving_params)
+    tag_inputs = vocabs[1].embedding_lookup(inputs[:,:,2], moving_params=self.moving_params)
+    if self.add_to_pretrained and not self.char_based:
+      word_inputs += pret_inputs
+    if self.word_l2_reg > 0:
+      unk_mask = tf.expand_dims(tf.to_float(tf.greater(inputs[:,:,1], vocabs[0].UNK)),2)
+      word_loss = self.word_l2_reg*tf.nn.l2_loss((word_inputs - pret_inputs) * unk_mask)
+    embed_inputs = self.embed_concat(word_inputs, tag_inputs)
     
-    top_recur = self.embed_concat(word_inputs+pret_inputs, tag_inputs)
+    top_recur = embed_inputs
+    recur_diag_bilin = False#self.recur_diag_bilin and tag_inputs.get_shape().as_list()[-1] == word_inputs.get_shape().as_list()[-1]
     for i in xrange(self.n_recur):
       with tf.variable_scope('RNN%d' % i, reuse=reuse):
-        top_recur, _ = self.RNN(top_recur)
+        top_recur, _ = self.RNN(top_recur, recur_diag_bilin=recur_diag_bilin)
+        recur_diag_bilin = self.recur_diag_bilin
+    if self.attn_based:
+      top_recur = self.soft_attn(top_recur, recur_diag_bilin=recur_diag_bilin)
+      recur_diag_bilin = False
     
-    top_mlp = top_recur
-    with tf.variable_scope('MLP0', reuse=reuse):
-      parse_mlp, rel_mlp = self.double_MLP(top_mlp, n_splits=2)
-    
-    with tf.variable_scope('Parses', reuse=reuse):
-      parse_logits = tf.squeeze(self.linear_classifier(parse_mlp, 1))
-      parse_output = self.output(parse_logits, targets[:,:,1])
+    with tf.variable_scope('Arcs', reuse=reuse):
+      arc_logits = self.bilinear_classifier(top_recur,top_recur)
+      arc_output = self.output(arc_logits, targets[:,:,1])
       if moving_params is None:
         predictions = targets[:,:,1]
       else:
-        predictions = parse_output['predictions']
+        predictions = arc_output['predictions']
     with tf.variable_scope('Rels', reuse=reuse):
-      rel_logits, rel_logits_cond = self.conditional_linear_classifier(rel_mlp, len(vocabs[2]), predictions)
+      rel_logits, rel_logits_cond = self.conditional_bilinear_classifier(top_recur, top_recur, len(vocabs[2]), predictions)
       rel_output = self.output(rel_logits, targets[:,:,2])
-      rel_output['probabilities'] = self.conditional_probabilities(rel_logits_cond, transpose=False)
+      rel_output['probabilities'] = self.conditional_probabilities(rel_logits_cond)
     
     output = {}
-    output['probabilities'] = tf.tuple([parse_output['probabilities'],
+    output['probabilities'] = tf.tuple([arc_output['probabilities'],
                                         rel_output['probabilities']])
-    output['predictions'] = tf.pack([parse_output['predictions'],
+    output['predictions'] = tf.pack([arc_output['predictions'],
                                      rel_output['predictions']])
-    output['correct'] = parse_output['correct'] * rel_output['correct']
-    output['tokens'] = parse_output['tokens']
+    output['correct'] = arc_output['correct'] * rel_output['correct']
+    output['tokens'] = arc_output['tokens']
     output['n_correct'] = tf.reduce_sum(output['correct'])
     output['n_tokens'] = self.n_tokens
     output['accuracy'] = output['n_correct'] / output['n_tokens']
-    output['loss'] = parse_output['loss'] + rel_output['loss'] 
+    output['loss'] = arc_output['loss'] + rel_output['loss'] 
+    if self.word_l2_reg > 0:
+      output['loss'] += word_loss
     
-    output['embed'] = tf.pack([word_inputs, tag_inputs])
+    output['embed'] = embed_inputs
     output['recur'] = top_recur
-    output['parse_mlp'] = parse_mlp
-    output['rel_mlp'] = rel_mlp
-    output['parse_logits'] = parse_logits
+    output['arc_logits'] = arc_logits
     output['rel_logits'] = rel_logits
     return output
   

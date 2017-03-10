@@ -145,10 +145,6 @@ class Dataset(Configurable):
     for bkt_idx, bucket in enumerate(self._metabucket):
       if batch_size == 0:
         n_splits = 1
-      #elif not self.minimize_pads:
-      #  n_splits = max(len(bucket) // batch_size, 1)
-      #  if bucket.size > 100:
-      #    n_splits *= 2
       else:
         n_tokens = len(bucket) * bucket.size
         n_splits = max(n_tokens // batch_size, 1)
@@ -162,43 +158,15 @@ class Dataset(Configurable):
     if shuffle:
       np.random.shuffle(minibatches)
     for bkt_idx, bkt_mb in minibatches:
+      feed_dict = {}
       data = self[bkt_idx].data[bkt_mb]
       sents = self[bkt_idx].sents[bkt_mb]
       maxlen = np.max(np.sum(np.greater(data[:,:,0], 0), axis=1))
-      feed_dict = {
+      feed_dict.update({
         self.inputs: data[:,:maxlen,input_idxs],
         self.targets: data[:,:maxlen,target_idxs]
-      }
+      })
       yield feed_dict, sents
-  
-  #=============================================================
-  def get_minibatches2(self, batch_size, input_idxs, target_idxs):
-    """"""
-    
-    bkt_lens = np.empty(len(self._metabucket))
-    for i, bucket in enumerate(self._metabucket):
-      bkt_lens[i] = len(bucket)
-    
-    total_sents = np.sum(bkt_lens)
-    bkt_probs = bkt_lens / total_sents
-    n_sents = 0
-    while n_sents < total_sents:
-      n_sents += batch_size
-      bkt = np.random.choice(self._metabucket._buckets, p=bkt_probs)
-      data = bkt.data[np.random.randint(len(bkt), size=batch_size)]
-      if bkt.size > 100:
-        for data_ in np.array_split(data, 2):
-          feed_dict = {
-            self.inputs: data_[:,:,input_idxs],
-            self.targets: data_[:,:,target_idxs]
-          }
-          yield feed_dict
-      else:
-        feed_dict = {
-          self.inputs: data[:,:,input_idxs],
-          self.targets: data[:,:,target_idxs]
-        }
-        yield feed_dict
   
   #=============================================================
   @property

@@ -81,7 +81,11 @@ class NN(Configurable):
       tag_embed_size = 0 if tag_inputs is None else tag_inputs.get_shape().as_list()[-1]
       rel_embed_size = 0 if rel_inputs is None else rel_inputs.get_shape().as_list()[-1]
       total_size = word_embed_size + tag_embed_size + rel_embed_size
+      if word_embed_size == tag_embed_size:
+        total_size += word_embed_size
       dropped_sizes = word_mask * word_embed_size + tag_mask * tag_embed_size + rel_mask * rel_embed_size
+      if word_embed_size == tag_embed_size:
+        dropped_sizes += word_mask * tag_mask * word_embed_size
       scale_factor = total_size / (dropped_sizes + self.epsilon)
       
       word_inputs *= word_mask * scale_factor
@@ -89,244 +93,153 @@ class NN(Configurable):
         tag_inputs *= tag_mask * scale_factor
       if rel_inputs is not None:
         rel_inputs *= rel_mask * scale_factor
+    else:
+      word_embed_size = word_inputs.get_shape().as_list()[-1]
+      tag_embed_size = 0 if tag_inputs is None else tag_inputs.get_shape().as_list()[-1]
+      rel_embed_size = 0 if rel_inputs is None else rel_inputs.get_shape().as_list()[-1]
     
     return tf.concat(2, filter(lambda x: x is not None, [word_inputs, tag_inputs, rel_inputs]))
-    
+  
   #=============================================================
-  def RNN(self, inputs, fw_keep_mask=None, bw_keep_mask=None):
+  def RNN(self, inputs):
     """"""
     
-    batch_size = tf.shape(inputs)[0]
     input_size = inputs.get_shape().as_list()[-1]
     cell = self.recur_cell(self._config, input_size=input_size, moving_params=self.moving_params)
     lengths = tf.reshape(tf.to_int64(self.sequence_lengths), [-1])
     
     if self.moving_params is None:
+      ff_keep_prob = self.ff_keep_prob
       recur_keep_prob = self.recur_keep_prob
     else:
+      ff_keep_prob = 1
       recur_keep_prob = 1
     
     if self.recur_bidir:
       top_recur, fw_recur, bw_recur = rnn.dynamic_bidirectional_rnn(cell, cell, inputs,
                                                                     lengths,
-                                                                    fw_keep_mask=fw_keep_mask,
-                                                                    bw_keep_mask=bw_keep_mask,
+                                                                    ff_keep_prob=ff_keep_prob,
                                                                     recur_keep_prob=recur_keep_prob,
                                                                     dtype=tf.float32)
       fw_cell, fw_out = tf.split(1, 2, fw_recur)
       bw_cell, bw_out = tf.split(1, 2, bw_recur)
       end_recur = tf.concat(1, [fw_out, bw_out])
       top_recur.set_shape([tf.Dimension(None), tf.Dimension(None), tf.Dimension(2*self.recur_size)])
-      if self.moving_params is None:
-        for direction in ('FW', 'BW'):
-          if self.recur_cell.__name__ != 'GRUCell':
-            with tf.variable_scope("BiRNN_%s/%s/Linear" % (direction,self.recur_cell.__name__), reuse=True):
-              matrix = tf.get_variable('Weights')
-              n_splits = matrix.get_shape().as_list()[-1] // self.recur_size
-              I = tf.diag(tf.ones([self.recur_size]))
-              for W in tf.split(1, n_splits, matrix):
-                WTWmI = tf.matmul(W, W, transpose_a=True) - I
-                tf.add_to_collection('ortho_losses', tf.nn.l2_loss(WTWmI))
-          else:
-            for name in ['Gates', 'Candidate']:
-              with tf.variable_scope("BiRNN_%s/GRUCell/%s/Linear" % (direction,name), reuse=True):
-                matrix = tf.get_variable('Weights')
-                n_splits = matrix.get_shape().as_list()[-1] // self.recur_size
-                I = tf.diag(tf.ones([self.recur_size]))
-                for W in tf.split(1, n_splits, matrix):
-                  WTWmI = tf.matmul(W, W, transpose_a=True) - I
-                  tf.add_to_collection('ortho_losses', tf.nn.l2_loss(WTWmI))
     else:
       top_recur, end_recur = rnn.dynamic_rnn(cell, inputs,
                                              lengths,
-                                             ff_keep_mask=fw_keep_mask,
+                                             ff_keep_prob=ff_keep_prob,
                                              recur_keep_prob=recur_keep_prob,
                                              dtype=tf.float32)
       top_recur.set_shape([tf.Dimension(None), tf.Dimension(None), tf.Dimension(self.recur_size)])
-      if self.moving_params is None:
-        if self.recur_cell.__name__ != 'GRUCell':
-          with tf.variable_scope("%s/Linear" % (self.recur_cell.__name__), reuse=True):
-            matrix = tf.get_variable('Weights')
-            n_splits = matrix.get_shape().as_list()[-1] // self.recur_size
-            I = tf.diag(tf.ones([self.recur_size]))
-            for W in tf.split(1, n_splits, matrix):
-              WTWmI = tf.matmul(W, W, transpose_a=True) - I
-              tf.add_to_collection('ortho_losses', tf.nn.l2_loss(WTWmI))
-        else:
-          for name in ['Gates', 'Candidate']:
-            with tf.variable_scope("GRUCell/%s/Linear" % (name), reuse=True):
-              matrix = tf.get_variable('Weights')
-              n_splits = matrix.get_shape().as_list()[-1] // self.recur_size
-              I = tf.diag(tf.ones([self.recur_size]))
-              for W in tf.split(1, n_splits, matrix):
-                WTWmI = tf.matmul(W, W, transpose_a=True) - I
-                tf.add_to_collection('ortho_losses', tf.nn.l2_loss(WTWmI))
-              
-    if self.moving_params is None:
-      tf.add_to_collection('recur_losses', self.recur_loss(top_recur))
-      tf.add_to_collection('covar_losses', self.covar_loss(top_recur))
     return top_recur, end_recur
   
   #=============================================================
-  def RNN(self, inputs, fw_keep_mask=None, bw_keep_mask=None):
+  def soft_attn(self, top_recur):
     """"""
     
-    batch_size = tf.shape(inputs)[0]
-    input_size = inputs.get_shape().as_list()[-1]
-    cell = self.recur_cell(self._config, input_size=input_size, moving_params=self.moving_params)
-    lengths = tf.reshape(tf.to_int64(self.sequence_lengths), [-1])
+    reuse = (self.moving_params is not None) or None
     
-    if self.moving_params is None:
-      recur_keep_prob = self.recur_keep_prob
-    else:
-      recur_keep_prob = 1
-    
-    if self.recur_bidir:
-      top_recur, fw_recur, bw_recur = rnn.dynamic_bidirectional_rnn(cell, cell, inputs,
-                                                                    lengths,
-                                                                    fw_keep_mask=fw_keep_mask,
-                                                                    bw_keep_mask=bw_keep_mask,
-                                                                    recur_keep_prob=recur_keep_prob,
-                                                                    dtype=tf.float32)
-      fw_cell, fw_out = tf.split(1, 2, fw_recur)
-      bw_cell, bw_out = tf.split(1, 2, bw_recur)
-      end_recur = tf.concat(1, [fw_out, bw_out])
-      top_recur.set_shape([tf.Dimension(None), tf.Dimension(None), tf.Dimension(2*self.recur_size)])
-      if self.moving_params is None:
-        for direction in ('FW', 'BW'):
-          if self.recur_cell.__name__ != 'GRUCell':
-            with tf.variable_scope("BiRNN_%s/%s/Linear" % (direction,self.recur_cell.__name__), reuse=True):
-              matrix = tf.get_variable('Weights')
-              n_splits = matrix.get_shape().as_list()[-1] // self.recur_size
-              I = tf.diag(tf.ones([self.recur_size]))
-              for W in tf.split(1, n_splits, matrix):
-                WTWmI = tf.matmul(W, W, transpose_a=True) - I
-                tf.add_to_collection('ortho_losses', tf.nn.l2_loss(WTWmI))
-          else:
-            for name in ['Gates', 'Candidate']:
-              with tf.variable_scope("BiRNN_%s/GRUCell/%s/Linear" % (direction,name), reuse=True):
-                matrix = tf.get_variable('Weights')
-                n_splits = matrix.get_shape().as_list()[-1] // self.recur_size
-                I = tf.diag(tf.ones([self.recur_size]))
-                for W in tf.split(1, n_splits, matrix):
-                  WTWmI = tf.matmul(W, W, transpose_a=True) - I
-                  tf.add_to_collection('ortho_losses', tf.nn.l2_loss(WTWmI))
-    else:
-      top_recur, end_recur = rnn.dynamic_rnn(cell, inputs,
-                                             lengths,
-                                             ff_keep_mask=fw_keep_mask,
-                                             recur_keep_prob=recur_keep_prob,
-                                             dtype=tf.float32)
-      top_recur.set_shape([tf.Dimension(None), tf.Dimension(None), tf.Dimension(self.recur_size)])
-      if self.moving_params is None:
-        if self.recur_cell.__name__ != 'GRUCell':
-          with tf.variable_scope("%s/Linear" % (self.recur_cell.__name__), reuse=True):
-            matrix = tf.get_variable('Weights')
-            n_splits = matrix.get_shape().as_list()[-1] // self.recur_size
-            I = tf.diag(tf.ones([self.recur_size]))
-            for W in tf.split(1, n_splits, matrix):
-              WTWmI = tf.matmul(W, W, transpose_a=True) - I
-              tf.add_to_collection('ortho_losses', tf.nn.l2_loss(WTWmI))
-        else:
-          for name in ['Gates', 'Candidate']:
-            with tf.variable_scope("GRUCell/%s/Linear" % (name), reuse=True):
-              matrix = tf.get_variable('Weights')
-              n_splits = matrix.get_shape().as_list()[-1] // self.recur_size
-              I = tf.diag(tf.ones([self.recur_size]))
-              for W in tf.split(1, n_splits, matrix):
-                WTWmI = tf.matmul(W, W, transpose_a=True) - I
-                tf.add_to_collection('ortho_losses', tf.nn.l2_loss(WTWmI))
-              
-    if self.moving_params is None:
-      tf.add_to_collection('recur_losses', self.recur_loss(top_recur))
-      tf.add_to_collection('covar_losses', self.covar_loss(top_recur))
-    return top_recur, end_recur
-  
+    input_size = top_recur.get_shape().as_list()[-1]
+    with tf.variable_scope('MLP', reuse=reuse):
+      head_mlp, dep_mlp = self.MLP(top_recur, self.info_mlp_size,
+                                   func=self.info_func,
+                                   keep_prob=self.info_keep_prob,
+                                   n_splits=2)
+    with tf.variable_scope('Arcs', reuse=reuse):
+      arc_logits = self.bilinear_classifier(dep_mlp, head_mlp, keep_prob=self.info_keep_prob)
+      arc_prob = self.softmax(arc_logits)
+      head_lin = tf.batch_matmul(arc_prob, top_recur)
+      top_recur = tf.concat(2, [top_recur, head_lin])
+    top_recur.set_shape([tf.Dimension(None), tf.Dimension(None), tf.Dimension(4*self.recur_size)])
+    return top_recur
+
   #=============================================================
-  def MLP(self, inputs, n_splits=1):
+  def linear(self, inputs, output_size, n_splits=1, add_bias=False):
     """"""
     
     n_dims = len(inputs.get_shape().as_list())
     batch_size = tf.shape(inputs)[0]
     bucket_size = tf.shape(inputs)[1]
     input_size = inputs.get_shape().as_list()[-1]
-    output_size = self.mlp_size
     output_shape = tf.pack([batch_size] + [bucket_size]*(n_dims-2) + [output_size])
     shape_to_set = [tf.Dimension(None)]*(n_dims-1) + [tf.Dimension(output_size)]
     
     if self.moving_params is None:
-      if self.drop_gradually:
-        s = self.global_sigmoid
-        keep_prob = s + (1-s)*self.mlp_keep_prob
-      else:
+      keep_prob = self.info_keep_prob
+    else:
+      keep_prob = 1
+    
+    if keep_prob < 1:
+      noise_shape = tf.pack([batch_size] + [1]*(n_dims-2) + [input_size])
+      inputs = tf.nn.dropout(inputs, keep_prob, noise_shape=noise_shape)
+
+    lin = linalg.linear(inputs,
+                        output_size,
+                        n_splits=n_splits,
+                        add_bias=add_bias,
+                        moving_params=self.moving_params)
+    if n_splits == 1:
+      lin = [lin]
+    for i, split in enumerate(lin):
+      split.set_shape(shape_to_set)
+    if n_splits == 1:
+      return lin[0]
+    else:
+      return lin
+
+  #=============================================================
+  def softmax(self, inputs):
+    """"""
+    
+    input_shape = tf.shape(inputs)
+    batch_size = input_shape[0]
+    bucket_size = input_shape[1]
+    input_size = input_shape[2]
+    inputs = tf.reshape(inputs, tf.pack([-1, input_size]))
+    probs = tf.nn.softmax(inputs)
+    probs = tf.reshape(probs, tf.pack([batch_size, bucket_size, input_size]))
+    return probs
+  
+  #=============================================================
+  def MLP(self, inputs, output_size, func=None, keep_prob=None, n_splits=1):
+    """"""
+    
+    n_dims = len(inputs.get_shape().as_list())
+    batch_size = tf.shape(inputs)[0]
+    bucket_size = tf.shape(inputs)[1]
+    input_size = inputs.get_shape().as_list()[-1]
+    output_shape = tf.pack([batch_size] + [bucket_size]*(n_dims-2) + [output_size])
+    shape_to_set = [tf.Dimension(None)]*(n_dims-1) + [tf.Dimension(output_size)]
+    if func is None:
+      func = self.mlp_func
+    
+    if self.moving_params is None:
+      if keep_prob is None:
         keep_prob = self.mlp_keep_prob
     else:
       keep_prob = 1
-    if isinstance(keep_prob, tf.Tensor) or keep_prob < 1:
+    if keep_prob < 1:
       noise_shape = tf.pack([batch_size] + [1]*(n_dims-2) + [input_size])
       inputs = tf.nn.dropout(inputs, keep_prob, noise_shape=noise_shape)
     
     linear = linalg.linear(inputs,
                         output_size,
-                        n_splits=n_splits,
+                        n_splits=n_splits * (1+(func.__name__ in ('gated_tanh', 'gated_identity'))),
                         add_bias=True,
                         moving_params=self.moving_params)
+    if func.__name__ in ('gated_tanh', 'gated_identity'):
+      linear = [tf.concat(n_dims-1, [lin1, lin2]) for lin1, lin2 in zip(linear[:len(linear)//2], linear[len(linear)//2:])]
     if n_splits == 1:
       linear = [linear]
     for i, split in enumerate(linear):
-      split = self.mlp_func(split)
+      split = func(split)
       split.set_shape(shape_to_set)
       linear[i] = split
-    if self.moving_params is None:
-      with tf.variable_scope('Linear', reuse=True):
-        matrix = tf.get_variable('Weights')
-        I = tf.diag(tf.ones([self.mlp_size]))
-        for W in tf.split(1, n_splits, matrix):
-          WTWmI = tf.matmul(W, W, transpose_a=True) - I
-          tf.add_to_collection('ortho_losses', tf.nn.l2_loss(WTWmI))
-      for split in linear:
-        tf.add_to_collection('covar_losses', self.covar_loss(split))
     if n_splits == 1:
       return linear[0]
     else:
       return linear
-  
-  #=============================================================
-  def linear(self, inputs, output_size, add_bias=False):
-    """"""
-    
-    n_dims = len(inputs.get_shape().as_list())
-    batch_size = tf.shape(inputs)[0]
-    bucket_size = tf.shape(inputs)[1]
-    input_size = inputs.get_shape().as_list()[-1]
-    output_shape = tf.pack([batch_size] + [bucket_size]*(n_dims-2) + [output_size])
-    shape_to_set = [tf.Dimension(None)]*(n_dims-1) + [tf.Dimension(output_size)]
-    
-    if self.moving_params is None:
-      if self.drop_gradually:
-        s = self.global_sigmoid
-        keep_prob = s + (1-s)*self.mlp_keep_prob
-      else:
-        keep_prob = self.mlp_keep_prob
-    else:
-      keep_prob = 1
-    if isinstance(keep_prob, tf.Tensor) or keep_prob < 1:
-      noise_shape = tf.pack([batch_size] + [1]*(n_dims-2) + [input_size])
-      inputs = tf.nn.dropout(inputs, keep_prob, noise_shape=noise_shape)
-    
-    lin = linalg.linear(inputs,
-                        output_size,
-                        add_bias=add_bias,
-                        moving_params=self.moving_params)
-    lin.set_shape(shape_to_set)
-    if self.moving_params is None:
-      with tf.variable_scope('Linear', reuse=True):
-        W = tf.get_variable('Weights')
-        I = tf.diag(tf.ones([output_size]))
-        WTWmI = tf.matmul(W, W, transpose_a=True) - I
-        tf.add_to_collection('ortho_losses', tf.nn.l2_loss(WTWmI))
-      tf.add_to_collection('covar_losses', self.covar_loss(lin))
-    return lin
   
   #=============================================================
   def double_MLP(self, inputs, n_splits=1):
@@ -335,16 +248,12 @@ class NN(Configurable):
     batch_size = tf.shape(inputs)[0]
     bucket_size = tf.shape(inputs)[1]
     input_size = inputs.get_shape().as_list()[-1]
-    output_size = self.mlp_size
+    output_size = self.attn_mlp_size
     output_shape = tf.pack([batch_size, bucket_size, bucket_size, output_size])
     shape_to_set = [tf.Dimension(None), tf.Dimension(None), tf.Dimension(None), tf.Dimension(output_size)]
     
     if self.moving_params is None:
-      if self.drop_gradually:
-        s = self.global_sigmoid
-        keep_prob = s + (1-s)*self.mlp_keep_prob
-      else:
-        keep_prob = self.mlp_keep_prob
+      keep_prob = self.mlp_keep_prob
     else:
       keep_prob = 1
     if isinstance(keep_prob, tf.Tensor) or keep_prob < 1:
@@ -364,22 +273,13 @@ class NN(Configurable):
     top_mlps = tf.split(3, n_splits, self.mlp_func(lin))
     for top_mlp in top_mlps:
       top_mlp.set_shape(shape_to_set)
-    if self.moving_params is None:
-      with tf.variable_scope('Linear', reuse=True):
-        matrix = tf.get_variable('Weights')
-        I = tf.diag(tf.ones([self.mlp_size]))
-        for W in tf.split(1, 2*n_splits, matrix):
-          WTWmI = tf.matmul(W, W, transpose_a=True) - I
-          tf.add_to_collection('ortho_losses', tf.nn.l2_loss(WTWmI))
-      for split in top_mlps:
-        tf.add_to_collection('covar_losses', self.covar_loss(split))
     if n_splits == 1:
       return top_mlps[0]
     else:
       return top_mlps
   
   #=============================================================
-  def linear_classifier(self, inputs, n_classes, add_bias=True):
+  def linear_classifier(self, inputs, n_classes, add_bias=True, keep_prob=None):
     """"""
     
     n_dims = len(inputs.get_shape().as_list())
@@ -390,10 +290,7 @@ class NN(Configurable):
     output_shape = tf.pack([batch_size] + [bucket_size]*(n_dims-2) + [output_size])
     
     if self.moving_params is None:
-      if self.drop_gradually:
-        s = self.global_sigmoid
-        keep_prob = s + (1-s)*self.mlp_keep_prob
-      else:
+      if keep_prob is None:
         keep_prob = self.mlp_keep_prob
     else:
       keep_prob = 1
@@ -412,25 +309,24 @@ class NN(Configurable):
     return output
   
   #=============================================================
-  def bilinear_classifier(self, inputs1, inputs2, add_bias1=False, add_bias2=True):
+  def bilinear_classifier(self, inputs1, inputs2, add_bias1=True, add_bias2=False, keep_prob=None):
     """"""
     
     input_shape = tf.shape(inputs1)
     batch_size = input_shape[0]
     bucket_size = input_shape[1]
     input_size = inputs1.get_shape().as_list()[-1]
-    shape_to_set = tf.pack([batch_size, bucket_size, input_size+1])
     
     if self.moving_params is None:
-      if self.drop_gradually:
-        s = self.global_sigmoid
-        keep_prob = s + (1-s)*self.mlp_keep_prob
-      else:
+      if keep_prob is None:
         keep_prob = self.mlp_keep_prob
     else:
       keep_prob = 1
     if isinstance(keep_prob, tf.Tensor) or keep_prob < 1:
       noise_shape = tf.pack([batch_size, 1, input_size])
+      # Experimental
+      #inputs1 = tf.nn.dropout(inputs1, keep_prob if add_bias2 else tf.sqrt(keep_prob), noise_shape=noise_shape)
+      #inputs2 = tf.nn.dropout(inputs2, keep_prob if add_bias1 else tf.sqrt(keep_prob), noise_shape=noise_shape)
       inputs1 = tf.nn.dropout(inputs1, keep_prob, noise_shape=noise_shape)
       inputs2 = tf.nn.dropout(inputs2, keep_prob, noise_shape=noise_shape)
     
@@ -443,7 +339,7 @@ class NN(Configurable):
     return output
   
   #=============================================================
-  def diagonal_bilinear_classifier(self, inputs1, inputs2, add_bias1=False, add_bias2=True):
+  def diagonal_bilinear_classifier(self, inputs1, inputs2, add_bias1=True, add_bias2=False):
     """"""
     
     input_shape = tf.shape(inputs1)
@@ -453,11 +349,7 @@ class NN(Configurable):
     shape_to_set = tf.pack([batch_size, bucket_size, input_size+1])
     
     if self.moving_params is None:
-      if self.drop_gradually:
-        s = self.global_sigmoid
-        keep_prob = s + (1-s)*self.mlp_keep_prob
-      else:
-        keep_prob = self.mlp_keep_prob
+      keep_prob = self.mlp_keep_prob
     else:
       keep_prob = 1
     if isinstance(keep_prob, tf.Tensor) or keep_prob < 1:
@@ -488,11 +380,7 @@ class NN(Configurable):
       probs = tf.stop_gradient(probs)
     
     if self.moving_params is None:
-      if self.drop_gradually:
-        s = self.global_sigmoid
-        keep_prob = s + (1-s)*self.mlp_keep_prob
-      else:
-        keep_prob = self.mlp_keep_prob
+      keep_prob = self.mlp_keep_prob
     else:
       keep_prob = 1
     if isinstance(keep_prob, tf.Tensor) or keep_prob < 1:
@@ -509,7 +397,7 @@ class NN(Configurable):
     return weighted_lin, lin
   
   #=============================================================
-  def conditional_diagonal_bilinear_classifier(self, inputs1, inputs2, n_classes, probs, add_bias1=True, add_bias2=True, add_bias=True):
+  def conditional_diagonal_bilinear_classifier(self, inputs1, inputs2, n_classes, probs, add_bias1=True, add_bias2=True):
     """"""
     
     input_shape = tf.shape(inputs1)
@@ -524,24 +412,23 @@ class NN(Configurable):
       probs = tf.stop_gradient(probs)
     
     if self.moving_params is None:
-      if self.drop_gradually:
-        s = self.global_sigmoid
-        keep_prob = s + (1-s)*self.mlp_keep_prob
-      else:
-        keep_prob = self.mlp_keep_prob
+      keep_prob = self.mlp_keep_prob
     else:
       keep_prob = 1
     if isinstance(keep_prob, tf.Tensor) or keep_prob < 1:
       noise_shape = tf.pack([batch_size, 1, input_size])
-      drop_mask = tf.nn.dropout(tf.ones(noise_shape), keep_prob, noise_shape=noise_shape)
-      inputs1 *= drop_mask
-      inputs2 *= drop_mask
+      inputs1 = tf.nn.dropout(inputs1, tf.sqrt(keep_prob), noise_shape=noise_shape)
+      inputs2 = tf.nn.dropout(inputs2, tf.sqrt(keep_prob), noise_shape=noise_shape)
+    
+    inputs1 = tf.concat(2, [inputs1, tf.ones(tf.pack([batch_size, bucket_size, 1]))])
+    inputs1.set_shape(input_shape_to_set)
+    inputs2 = tf.concat(2, [inputs2, tf.ones(tf.pack([batch_size, bucket_size, 1]))])
+    inputs2.set_shape(input_shape_to_set)
     
     bilin = linalg.diagonal_bilinear(inputs1, inputs2,
                                      n_classes,
                                      add_bias1=add_bias1,
                                      add_bias2=add_bias2,
-                                     add_bias=add_bias,
                                      initializer=tf.zeros_initializer,
                                      moving_params=self.moving_params)
     weighted_bilin = tf.batch_matmul(bilin, tf.expand_dims(probs, 3))
@@ -564,11 +451,7 @@ class NN(Configurable):
       probs = tf.stop_gradient(probs)
     
     if self.moving_params is None:
-      if self.drop_gradually:
-        s = self.global_sigmoid
-        keep_prob = s + (1-s)*self.mlp_keep_prob
-      else:
-        keep_prob = self.mlp_keep_prob
+      keep_prob = self.mlp_keep_prob
     else:
       keep_prob = 1
     if isinstance(keep_prob, tf.Tensor) or keep_prob < 1:
@@ -638,49 +521,6 @@ class NN(Configurable):
     logits2D = tf.reshape(logits4D, tf.pack([-1, n_classes]))
     probabilities2D = tf.nn.softmax(logits2D)
     return tf.reshape(probabilities2D, original_shape)
-    
-  #=============================================================
-  def pseudo_predict(self, predictions, targets):
-    """"""
-    
-    random_flip = tf.random_uniform(tf.shape(predictions))
-    return tf.select(tf.greater(random_flip, self.global_sigmoid), predictions, targets)
-  
-  #=============================================================
-  def recur_loss(self, top_recur):
-    """"""
-    
-    batch_size = tf.to_float(tf.shape(top_recur)[0])
-    lengths = tf.reshape(self.sequence_lengths, [-1,1])
-    
-    norms = tf.sqrt(tf.reduce_sum(top_recur**2, 2, keep_dims=True) + 1e-12)
-    means = tf.reduce_sum(norms * self.tokens_to_keep3D, 1, keep_dims=True) / (self.n_tokens + 1e-12)
-    centered_norms = norms - means
-    var_norms = tf.reduce_sum(centered_norms**2, 1) / (lengths + 1e-12)
-    mean_var_norms = var_norms / batch_size
-    return tf.nn.l2_loss(tf.reduce_mean(mean_var_norms, 0))
-  
-  #=============================================================
-  def covar_loss(self, top_states):
-    """"""
-    
-    n_dims = len(top_states.get_shape().as_list())
-    hidden_size = top_states.get_shape().as_list()[-1]
-    n_tokens = tf.to_float(self.n_tokens)
-    I = tf.diag(tf.ones([hidden_size]))
-    
-    if n_dims == 3:
-      top_states = top_states * self.tokens_to_keep3D
-      n_tokens = self.n_tokens
-    elif n_dims == 4:
-      top_states = top_states * tf.expand_dims(self.tokens_to_keep3D, 1) * tf.expand_dims(self.tokens_to_keep3D, 2)
-      n_tokens = self.n_tokens**2
-    top_states = tf.reshape(top_states * self.tokens_to_keep3D, [-1, hidden_size])
-    means = tf.reduce_sum(top_states, 0, keep_dims=True) / n_tokens
-    centered_states = top_states - means
-    covar_mat = tf.matmul(centered_states, centered_states, transpose_a=True) / n_tokens
-    off_diag_covar_mat = covar_mat * (1-I)
-    return tf.nn.l2_loss(off_diag_covar_mat)
   
   #=============================================================
   def tag_argmax(self, tag_probs, tokens_to_keep):
@@ -699,7 +539,6 @@ class NN(Configurable):
       # block loops and pad heads
       parse_probs = parse_probs * tokens_to_keep * (1-I)
       parse_preds = np.argmax(parse_probs, axis=1)
-      #return parse_preds
       tokens = np.arange(1, length)
       roots = np.where(parse_preds[tokens] == 0)[0]+1
       # ensure at least one root

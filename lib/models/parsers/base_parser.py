@@ -42,16 +42,29 @@ class BaseParser(NN):
     raise NotImplementedError
   
   #=============================================================
-  def sanity_check(self, inputs, targets, predictions, vocabs, fileobject):
+  def sanity_check(self, inputs, targets, predictions, vocabs, fileobject, feed_dict={}):
     """"""
     
-    for tokens, golds, parse_preds, rel_preds in zip(inputs, targets, predictions[0], predictions[1]):
-      for l, (token, gold, parse, rel) in enumerate(zip(tokens, golds, parse_preds, rel_preds)):
-        if token[0] > 1:
-          word = vocabs[0][token[0]]
+    if vocabs[0].char_based:
+      char_inputs = feed_dict[vocabs[0].char_idxs]
+      rev_inputs = feed_dict[vocabs[0]._metabucket.rev_idxs]
+      #raw_input(feed_dict[vocabs[0]._metabucket._buckets[0].idxs][:,:,0])
+      new_vocab = [idxs for bucket in vocabs[0]._metabucket for idxs in feed_dict[bucket.idxs]]
+      new_vocab = [new_vocab[i] for i in rev_inputs]
+    else:
+      char_inputs = range(len(inputs))
+    for tokens, chars, golds, parse_preds, rel_preds in zip(inputs, char_inputs, targets, predictions[0], predictions[1]):
+      if not vocabs[0].char_based:
+        chars = range(len(tokens))
+      for l, (token, char, gold, parse, rel) in enumerate(zip(tokens, chars, golds, parse_preds, rel_preds)):
+        if token[0] > 0:
+          if vocabs[0].char_based:
+            word = ' '.join(vocabs[0][np.trim_zeros(new_vocab[char])])
+          else:
+            word = vocabs[0][token[0]]
           glove = vocabs[0].get_embed(token[1])
           tag = vocabs[1][token[2]]
-          gold_tag = gold[0]
+          gold_tag = vocabs[1][gold[0]]
           pred_parse = parse
           pred_rel = vocabs[2][rel]
           gold_parse = gold[1]

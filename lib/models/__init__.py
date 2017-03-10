@@ -18,4 +18,3 @@
 from nn import NN
 import rnn
 from parsers import *
-from taggers import *

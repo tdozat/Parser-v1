@@ -35,9 +35,6 @@ from configurable import Configurable
 from vocab import Vocab
 from dataset import Dataset
 
-# TODO make the optimizer class inherit from Configurable
-# TODO bayesian hyperparameter optimization
-# TODO start a UD tagger/parser pipeline
 #***************************************************************
 class Network(Configurable):
   """"""
@@ -69,7 +66,7 @@ class Network(Configurable):
       vocab = Vocab(vocab_file, index, self._config,
                     name=name,
                     cased=self.cased if not i else True,
-                    load_embed_file=(not i),
+                    use_pretrained=(not i),
                     global_step=self.global_step)
       self._vocabs.append(vocab)
     
@@ -227,7 +224,7 @@ class Network(Configurable):
                 n_valid_sents += len(targets)
                 n_valid_correct += n_correct
                 n_valid_tokens += n_tokens
-                self.model.sanity_check(inputs, targets, predictions, self._vocabs, f)
+                self.model.sanity_check(inputs, targets, predictions, self._vocabs, f, feed_dict=feed_dict)
             valid_loss /= k+1
             valid_accuracy = 100 * n_valid_correct / n_valid_tokens
             valid_time = n_valid_sents / valid_time
@@ -324,6 +321,37 @@ class Network(Configurable):
     return
   
   #=============================================================
+  def savefigs(self, sess, optimizer=False):
+    """"""
+    
+    import gc
+    import matplotlib as mpl
+    mpl.use('Agg')
+    import matplotlib.pyplot as plt
+    matdir = os.path.join(self.save_dir, 'matrices')
+    if not os.path.isdir(matdir):
+      os.mkdir(matdir)
+    for var in self.save_vars:
+      if optimizer or ('Optimizer' not in var.name):
+        print(var.name)
+        mat = sess.run(var)
+        if len(mat.shape) == 1:
+          mat = mat[None,:]
+        plt.figure()
+        try:
+          plt.pcolor(mat, cmap='RdBu')
+          plt.gca().invert_yaxis()
+          plt.colorbar()
+          plt.clim(vmin=-1, vmax=1)
+          plt.title(var.name)
+          plt.savefig(os.path.join(matdir, var.name.replace('/', '-')))
+        except ValueError:
+          pass
+        plt.close()
+        del mat
+        gc.collect()
+    
+  #=============================================================
   def _gen_ops(self):
     """"""
     
@@ -406,28 +434,9 @@ if __name__ == '__main__':
   argparser.add_argument('--load', action='store_true')
   argparser.add_argument('--model', default='Parser')
   argparser.add_argument('--matrix', action='store_true')
-  argparser.add_argument('--random', action='store_true')
   
   args, extra_args = argparser.parse_known_args()
   cargs = {k: v for (k, v) in vars(Configurable.argparser.parse_args(extra_args)).iteritems() if v is not None}
-  if args.random:
-    cargs['train_iters'] = 20000
-    cargs['cased'] = False#str(bool(np.random.randint(2)))
-    cargs['save_dir'] = 'saves/'+str(int(time.time()*100))
-    cargs['mlp_func'] = 'relu'
-    cargs['n_recur'] = str(np.random.choice([3,4,5], p=[.625, .25, .125]))
-    cargs['embed_size'] = str(int(10**np.random.uniform(1.5, 2.75)))
-    cargs['recur_size'] = str(int(10**np.random.uniform(2.25, 3)))
-    cargs['mlp_size'] = str(int(10**np.random.uniform(2,3)))
-    cargs['word_keep_prob'] = cargs['tag_keep_prob'] = str(np.random.uniform(.7,.9))
-    if np.random.randint(2):
-      cargs['recur_cell'] = 'CifLSTMCell'
-    if np.random.randint(1):
-      cargs['cell_include_prob'] = cargs['hidden_include_prob'] = str(np.random.uniform(.5, 1))
-    else:
-      cargs['ff_keep_prob'] = cargs['recur_keep_prob'] =str(np.random.uniform(.67,.85))
-    cargs['mlp_keep_prob'] = str(np.random.uniform(.5,.85))
-    cargs['decay_steps'] = str(int(np.random.uniform(1000,7500)))
   
   print('*** '+args.model+' ***')
   model = getattr(models, args.model)
@@ -461,12 +470,22 @@ if __name__ == '__main__':
     elif args.matrix:
       saver = tf.train.Saver(var_list=network.save_vars)
       saver.restore(sess, tf.train.latest_checkpoint(network.save_dir, latest_filename=network.name.lower()))
-      with tf.variable_scope('AttnParser/RNN2/BiRNN_FW/LSTMCell/Linear', reuse=True):
-        pkl.dump(sess.run(tf.get_variable('Weights')), open('mat.pkl', 'w'))
+      # TODO make this save pcolor plots of all matrices to a directory in save_dir
+      #with tf.variable_scope('RNN0/BiRNN_FW/LSTMCell/Linear', reuse=True):
+      #  pkl.dump(sess.run(tf.get_variable('Weights')), open('mat0.pkl', 'w'))
+      #with tf.variable_scope('RNN1/BiRNN_FW/LSTMCell/Linear', reuse=True):
+      #  pkl.dump(sess.run(tf.get_variable('Weights')), open('mat1.pkl', 'w'))
+      #with tf.variable_scope('RNN2/BiRNN_FW/LSTMCell/Linear', reuse=True):
+      #  pkl.dump(sess.run(tf.get_variable('Weights')), open('mat2.pkl', 'w'))
+      #with tf.variable_scope('MLP/Linear', reuse=True):
+      #  pkl.dump(sess.run(tf.get_variable('Weights')), open('mat3.pkl', 'w'))
+      network.savefigs(sess)
     else:
       os.system('echo Testing: >> %s/HEAD' % network.save_dir)
       os.system('git rev-parse HEAD >> %s/HEAD' % network.save_dir)
       saver = tf.train.Saver(var_list=network.save_vars)
       saver.restore(sess, tf.train.latest_checkpoint(network.save_dir, latest_filename=network.name.lower()))
       network.test(sess, validate=True)
+      start_time = time.time()
       network.test(sess, validate=False)
+      print('Parsing took %f seconds' % (time.time() - start_time))
